@@ -108,73 +108,12 @@ describe("extension entry point", () => {
     expect(after.systemPrompt).toContain("Use quests to track this task");
   });
 
-  it("nudges.enable=false short-circuits context handler even after many tool calls", async () => {
+  it("does not register a context handler for dynamic reminders", async () => {
     const pi = createMockPi();
     const { default: init } = await import("../src/index.js");
     init(pi as unknown as ExtensionAPI);
-    // Create an isolated project dir with .pi/settings.json that disables nudges.
-    const cwd = mkdtempSync(join(tmpdir(), "pi-quests-test-"));
-    mkdirSync(join(cwd, ".pi"), { recursive: true });
-    writeFileSync(
-      join(cwd, ".pi", "settings.json"),
-      JSON.stringify({ "pi-quests": { nudges: { enable: false } } }),
-    );
-    await pi._handlers.session_start[0](
-      {},
-      {
-        cwd,
-        sessionManager: { getBranch: vi.fn().mockReturnValue([]) },
-        ui: {
-          setStatus: vi.fn(),
-          theme: { fg: vi.fn((_, t) => t), bold: vi.fn((t) => t), strikethrough: vi.fn((t) => t) },
-        },
-      },
-    );
-    for (let i = 0; i < 8; i++) await pi._handlers.tool_execution_end[0]({ toolName: "read" });
-    const result = await pi._handlers.context[0]({ messages: [] });
-    expect(result).toBeUndefined();
-  });
 
-  it("nudges via context after 8 non-quest tools with 0 active quests", async () => {
-    const pi = createMockPi();
-    const { default: init } = await import("../src/index.js");
-    init(pi as unknown as ExtensionAPI);
-    for (let i = 0; i < 8; i++) await pi._handlers.tool_execution_end[0]({ toolName: "read" });
-    const result = await pi._handlers.context[0]({ messages: [] });
-    expect(result.messages).toHaveLength(1);
-    expect((result.messages[0] as { content: string }).content).toContain("QUEST REMINDER");
-    expect((result.messages[0] as { content: string }).content).toContain(
-      "Update your quest status before continuing",
-    );
-  });
-
-  it("nudges via context on first tool use before any quest call", async () => {
-    const pi = createMockPi();
-    const { default: init } = await import("../src/index.js");
-    init(pi as unknown as ExtensionAPI);
-    for (let i = 0; i < 8; i++) await pi._handlers.tool_execution_end[0]({ toolName: "bash" });
-    expect((await pi._handlers.context[0]({ messages: [] })).messages).toHaveLength(1);
-  });
-
-  it("nudges for complex prompt when 0 active quests exist", async () => {
-    const pi = createMockPi();
-    const { default: init } = await import("../src/index.js");
-    init(pi as unknown as ExtensionAPI);
-    const result = await pi._handlers.context[0]({
-      messages: [{ role: "user", content: "Refactor the auth module", timestamp: 1 }],
-    });
-    expect(result.messages).toHaveLength(2);
-    expect((result.messages[1] as { content: string }).content).toContain("QUEST REMINDER");
-  });
-
-  it("nudges at most once per turn", async () => {
-    const pi = createMockPi();
-    const { default: init } = await import("../src/index.js");
-    init(pi as unknown as ExtensionAPI);
-    for (let i = 0; i < 8; i++) await pi._handlers.tool_execution_end[0]({ toolName: "read" });
-    const first = await pi._handlers.context[0]({ messages: [] });
-    expect(first.messages).toHaveLength(1);
-    expect(await pi._handlers.context[0]({ messages: [] })).toBeUndefined();
+    expect(pi._handlers.context).toBeUndefined();
   });
 
   it("registers shortcut during extension init", async () => {

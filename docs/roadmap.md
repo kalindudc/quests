@@ -10,7 +10,6 @@
   - `/quests done <id>` command and tool
   - `/quests clear` command and tool
 - [x] agent prompt guidelines for quest management
-- [x] dynamic nudges via `context` event when the quest tool hasn't been used recently
 - [x] bug: when trying to add a subquest for a subquest, the returned error "not found" is unintuitive and misleading
 - [x] improve error messages with recovery hints (`Problem. Rule. Recovery hint.` pattern)
 - [x] add `split` action — break one quest into N steps under it
@@ -37,7 +36,6 @@
 - [ ] add `split`/`add_step` call annotations in `renderCall` — show `[id]` and `[n steps]` like other actions
 - [ ] improve fallback/error rendering in tool results — themed error boxes instead of raw plain text when `details.quests` is missing
 - [ ] register `quest-help` custom message renderer — replace cramped `ctx.ui.notify()` toast with scrollable markdown in the chat log
-- [ ] custom nudge message renderer — visually distinguish system nudges from user messages via `registerMessageRenderer`
 
 ### observability
 - [x] progress indicator for active quest (e.g., 3 of 7 complete)

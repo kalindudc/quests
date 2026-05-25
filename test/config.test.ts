@@ -31,7 +31,7 @@ describe("getConfig", () => {
     writeFileSync(join(tempDir, "settings.json"), JSON.stringify(settings));
   }
 
-  function _writeProjectSettings(cwd: string, settings: Record<string, unknown>): void {
+  function writeProjectSettings(cwd: string, settings: Record<string, unknown>): void {
     const projectPiDir = join(cwd, ".pi");
     mkdirSync(projectPiDir, { recursive: true });
     writeFileSync(join(projectPiDir, "settings.json"), JSON.stringify(settings));
@@ -43,9 +43,7 @@ describe("getConfig", () => {
   });
 
   it("allows overriding display.icon", () => {
-    const settingsPath = join(tempDir, ".pi", "settings.json");
-    mkdirSync(join(tempDir, ".pi"), { recursive: true });
-    writeFileSync(settingsPath, JSON.stringify({ "pi-quests": { display: { icon: "★" } } }));
+    writeProjectSettings(tempDir, { "pi-quests": { display: { icon: "★" } } });
     const ctx = createMockContext(tempDir);
     expect(getConfig(ctx).display.icon).toBe("★");
   });
@@ -77,21 +75,19 @@ describe("getConfig", () => {
 
   it("applies project settings override", () => {
     const projectDir = join(tempDir, "project");
-    mkdirSync(join(projectDir, ".pi"), { recursive: true });
-    writeFileSync(
-      join(projectDir, ".pi", "settings.json"),
-      JSON.stringify({
-        "pi-quests": {
-          nudges: { toolCallThreshold: 10 },
-          validation: { fakeDonePattern: "test" },
-        } as Partial<ResolvedConfig>,
-      }),
-    );
+    writeProjectSettings(projectDir, {
+      "pi-quests": {
+        ids: { length: 4 },
+        display: { showStatus: false },
+        shortcuts: { openQuests: "ctrl+shift+p" },
+      } as Partial<ResolvedConfig>,
+    });
     const ctx = createMockContext(projectDir);
     const config = getConfig(ctx);
-    expect(config.nudges.toolCallThreshold).toBe(10);
-    expect(config.validation.fakeDonePattern).toBe("test");
-    expect(config.ids.length).toBe(DEFAULT_CONFIG.ids.length);
+    expect(config.ids.length).toBe(4);
+    expect(config.display.showStatus).toBe(false);
+    expect(config.shortcuts?.openQuests).toBe("ctrl+shift+p");
+    expect(config.display.pageSize).toBe(DEFAULT_CONFIG.display.pageSize);
   });
 
   it("defaults display.showStatus to true and honors a user override", () => {
@@ -107,44 +103,22 @@ describe("getConfig", () => {
     expect(getConfig(ctxOverride).display.showStatus).toBe(false);
   });
 
-  it("defaults nudges.enable to true and honors a user override", () => {
-    const ctxDefault = createMockContext(tempDir);
-    expect(getConfig(ctxDefault).nudges.enable).toBe(true);
-
-    writeGlobalSettings({
-      "pi-quests": {
-        nudges: { enable: false },
-      } as Partial<ResolvedConfig>,
-    });
-    const ctxOverride = createMockContext(tempDir);
-    expect(getConfig(ctxOverride).nudges.enable).toBe(false);
-  });
-
   it("deep-merges global and project settings", () => {
     const projectDir = join(tempDir, "project2");
-    mkdirSync(join(projectDir, ".pi"), { recursive: true });
 
     writeGlobalSettings({
       "pi-quests": {
         ids: { length: 4 },
-        display: { pageSize: 8, progressBarMaxWidth: 20 },
-        nudges: {
-          toolCallThreshold: 1,
-          hintIntervalMinutes: 5,
-          complexTaskKeywords: ["alpha", "beta"],
-        },
+        display: { pageSize: 8, progressBarMaxWidth: 20, icon: "◇" },
+        shortcuts: { openQuests: "ctrl+shift+g" },
       } as Partial<ResolvedConfig>,
     });
 
-    writeFileSync(
-      join(projectDir, ".pi", "settings.json"),
-      JSON.stringify({
-        "pi-quests": {
-          display: { progressBarMaxWidth: 30 },
-          nudges: { zeroActiveToolCallThreshold: 7 },
-        } as Partial<ResolvedConfig>,
-      }),
-    );
+    writeProjectSettings(projectDir, {
+      "pi-quests": {
+        display: { progressBarMaxWidth: 30 },
+      } as Partial<ResolvedConfig>,
+    });
 
     const ctx = createMockContext(projectDir);
     const config = getConfig(ctx);
@@ -152,20 +126,13 @@ describe("getConfig", () => {
     // Global values preserved where project didn't override
     expect(config.ids.length).toBe(4);
     expect(config.display.pageSize).toBe(8);
-    expect(config.nudges.toolCallThreshold).toBe(1);
-    expect(config.nudges.hintIntervalMinutes).toBe(5);
-    expect(config.nudges.complexTaskKeywords).toEqual(["alpha", "beta"]);
+    expect(config.display.icon).toBe("◇");
+    expect(config.shortcuts?.openQuests).toBe("ctrl+shift+g");
 
     // Project overrides applied
     expect(config.display.progressBarMaxWidth).toBe(30);
-    expect(config.nudges.zeroActiveToolCallThreshold).toBe(7);
 
     // Defaults preserved where neither set
-    expect(config.nudges.timeBasedToolCallThreshold).toBe(
-      DEFAULT_CONFIG.nudges.timeBasedToolCallThreshold,
-    );
-    expect(config.nudges.staleProgressToolCallThreshold).toBe(
-      DEFAULT_CONFIG.nudges.staleProgressToolCallThreshold,
-    );
+    expect(config.display.showStatus).toBe(DEFAULT_CONFIG.display.showStatus);
   });
 });

@@ -6,48 +6,12 @@ import { getAgentDir } from "@mariozechner/pi-coding-agent";
 export interface ResolvedConfig {
   ids: { length: number };
   display: { pageSize: number; progressBarMaxWidth: number; icon: string; showStatus: boolean };
-  nudges: {
-    enable: boolean;
-    toolCallThreshold: number;
-    hintIntervalMinutes: number;
-    timeBasedToolCallThreshold: number;
-    zeroActiveToolCallThreshold: number;
-    staleProgressToolCallThreshold: number;
-    stepSuggestionToolCallThreshold: number;
-    complexTaskKeywords: string[];
-  };
-  validation: { fakeDonePattern: string };
   shortcuts?: { openQuests?: string };
 }
-
-export const DEFAULT_COMPLEX_TASK_KEYWORDS = [
-  "implement",
-  "refactor",
-  "investigate",
-  "analyze",
-  "audit",
-  "design",
-  "fix",
-  "plan",
-  "build",
-] as const;
-
-export const DEFAULT_FAKE_DONE_PATTERN = String.raw`\s[-\u2013\u2014]\s*(DONE|COMPLETED|FINISHED)$|\s[([](DONE|COMPLETED|FINISHED)[)\]]$`;
 
 export const DEFAULT_CONFIG: ResolvedConfig = {
   ids: { length: 2 },
   display: { pageSize: 10, progressBarMaxWidth: 24, icon: "󰣏", showStatus: true },
-  nudges: {
-    enable: true,
-    toolCallThreshold: 8,
-    hintIntervalMinutes: 4,
-    timeBasedToolCallThreshold: 8,
-    zeroActiveToolCallThreshold: 8,
-    staleProgressToolCallThreshold: 12,
-    stepSuggestionToolCallThreshold: 10,
-    complexTaskKeywords: [...DEFAULT_COMPLEX_TASK_KEYWORDS],
-  },
-  validation: { fakeDonePattern: DEFAULT_FAKE_DONE_PATTERN },
   shortcuts: {},
 };
 
@@ -118,30 +82,6 @@ export function getConfig(ctx: Pick<ExtensionContext, "cwd">): ResolvedConfig {
         user.display?.progressBarMaxWidth ?? DEFAULT_CONFIG.display.progressBarMaxWidth,
       icon: user.display?.icon ?? DEFAULT_CONFIG.display.icon,
       showStatus: user.display?.showStatus ?? DEFAULT_CONFIG.display.showStatus,
-    },
-    nudges: {
-      enable: user.nudges?.enable ?? DEFAULT_CONFIG.nudges.enable,
-      toolCallThreshold: user.nudges?.toolCallThreshold ?? DEFAULT_CONFIG.nudges.toolCallThreshold,
-      hintIntervalMinutes:
-        user.nudges?.hintIntervalMinutes ?? DEFAULT_CONFIG.nudges.hintIntervalMinutes,
-      timeBasedToolCallThreshold:
-        user.nudges?.timeBasedToolCallThreshold ?? DEFAULT_CONFIG.nudges.timeBasedToolCallThreshold,
-      zeroActiveToolCallThreshold:
-        user.nudges?.zeroActiveToolCallThreshold ??
-        DEFAULT_CONFIG.nudges.zeroActiveToolCallThreshold,
-      staleProgressToolCallThreshold:
-        user.nudges?.staleProgressToolCallThreshold ??
-        DEFAULT_CONFIG.nudges.staleProgressToolCallThreshold,
-      stepSuggestionToolCallThreshold:
-        user.nudges?.stepSuggestionToolCallThreshold ??
-        DEFAULT_CONFIG.nudges.stepSuggestionToolCallThreshold,
-      complexTaskKeywords: [
-        ...(user.nudges?.complexTaskKeywords ?? DEFAULT_CONFIG.nudges.complexTaskKeywords),
-      ],
-    },
-    validation: {
-      fakeDonePattern:
-        user.validation?.fakeDonePattern ?? DEFAULT_CONFIG.validation.fakeDonePattern,
     },
     shortcuts: {
       openQuests: user.shortcuts?.openQuests,
