@@ -31,7 +31,7 @@
   - `/` key should enter search/filter mode (filter by keyword or show incomplete only)
   - `a` key should give a prompt to add a new quest
   - `z` key should revert, `y` key should restore
-  - refactor widget from hand-rolled string arrays to `Container` + `SelectList` from `@mariozechner/pi-tui`
+  - refactor widget from hand-rolled string arrays to `Container` + `SelectList` from `@earendil-works/pi-tui`
 - [ ] respect `expanded`/`isPartial` in tool `renderResult` — collapsed summary by default, full tree when expanded; show spinner while partial
 - [ ] add `split`/`add_step` call annotations in `renderCall` — show `[id]` and `[n steps]` like other actions
 - [ ] improve fallback/error rendering in tool results — themed error boxes instead of raw plain text when `details.quests` is missing

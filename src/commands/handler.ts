@@ -3,7 +3,7 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import type { ResolvedConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { QuestAction, QuestLog } from "../quest/dataplane.js";

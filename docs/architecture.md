@@ -4,7 +4,7 @@
 
 ## Overview
 
-pi-quests is a [pi](https://github.com/mariozechner/pi-coding-agent) extension that adds a session-scoped quest log. It exposes one LLM-callable tool (`quest`) and one command namespace (`/quests`) that both operate on a shared in-memory `QuestLog` dataplane.
+pi-quests is a [pi](https://github.com/earendil-works/pi-mono/tree/main/packages/coding-agent) extension that adds a session-scoped quest log. It exposes one LLM-callable tool (`quest`) and one command namespace (`/quests`) that both operate on a shared in-memory `QuestLog` dataplane.
 
 The extension loads via `pi install npm:pi-quests` (or `pi -e ./src/index.ts` for local development). On load it registers the tool, command, message renderer, session event hooks, and system prompt injection.
 

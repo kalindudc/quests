@@ -1,5 +1,5 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import type { KeyId } from "@mariozechner/pi-tui";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { KeyId } from "@earendil-works/pi-tui";
 import { createQuestsHandler, openQuestList } from "./commands/handler.js";
 import { DEFAULT_CONFIG, getConfig, type ResolvedConfig } from "./config.js";
 import { logger } from "./logger.js";

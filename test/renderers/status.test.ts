@@ -6,7 +6,7 @@ const mockTheme = {
   fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
   bold: (text: string) => `**${text}**`,
   strikethrough: (text: string) => `~~${text}~~`,
-} as unknown as import("@mariozechner/pi-coding-agent").Theme;
+} as unknown as import("@earendil-works/pi-coding-agent").Theme;
 
 describe("QuestStatusWidget", () => {
   it("hides status when no quests exist", () => {

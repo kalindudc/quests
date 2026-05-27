@@ -1,7 +1,7 @@
-import type { MessageRenderer, MessageRenderOptions, Theme } from "@mariozechner/pi-coding-agent";
-import { getMarkdownTheme } from "@mariozechner/pi-coding-agent";
-import type { Component } from "@mariozechner/pi-tui";
-import { Markdown } from "@mariozechner/pi-tui";
+import type { MessageRenderer, MessageRenderOptions, Theme } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
+import { Markdown } from "@earendil-works/pi-tui";
 import { logger } from "../logger.js";
 
 export const questChangelogRenderer: MessageRenderer<{ content: string }> = (

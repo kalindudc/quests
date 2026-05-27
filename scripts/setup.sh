@@ -13,7 +13,7 @@ echo "  node $(node --version)"
 
 echo "==> Checking pi..."
 if ! command -v pi &>/dev/null; then
-  echo "Error: pi is required. Install with: npm install -g @mariozechner/pi-coding-agent"
+  echo "Error: pi is required. Install with: npm install -g @earendil-works/pi-coding-agent"
   exit 1
 fi
 echo "  pi $(pi --version 2>/dev/null || echo '(version unavailable)')"

@@ -1,4 +1,4 @@
-import type { AgentToolResult, ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import type { ResolvedConfig } from "../config.js";
 import { logger } from "../logger.js";

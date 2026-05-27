@@ -1,4 +1,4 @@
-import type { AgentToolResult, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CONFIG, type ResolvedConfig } from "../config.js";
 import { logger } from "../logger.js";
 import { getQuestSkillDocument } from "../prompts.js";
