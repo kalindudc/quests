@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-26
+
+- feat: migrate to `@earendil-works`
+- feat: remove the nudge-based acknowledgement system
+
 ## [0.7.0] - 2026-04-26
 
 - feat: add batch toggle and batch delete support for quests (#2) — @pascal-de-ladurantaye
