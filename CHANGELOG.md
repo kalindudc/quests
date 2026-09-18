@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: quest tool results follow pi's compact view — collapsed rows show a 10-line preview with a `ctrl+o` (`app.tools.expand`) hint, expanded rows show everything
+
 ## [0.8.0] - 2026-05-26
 
 - feat: migrate to `@earendil-works`

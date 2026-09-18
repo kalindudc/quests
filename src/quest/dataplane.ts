@@ -146,6 +146,30 @@ export class QuestLog {
     this.usedIds.add(id);
     return id;
   }
+
+  /*
+   * Runs `fn` and, if it throws, restores all mutable state to the snapshot
+   * taken beforehand. Makes multi-step mutations (batch add, split) atomic so a
+   * partial failure (e.g. ID exhaustion mid-loop) cannot leave orphaned quests,
+   * steps, history, or used IDs behind.
+   */
+  private runTransaction<T>(fn: () => T): T {
+    const quests = [...this.quests];
+    const steps = [...this.steps];
+    const history = [...this.history];
+    const usedIds = new Set(this.usedIds);
+    const redoStack = [...this.redoStack];
+    try {
+      return fn();
+    } catch (err) {
+      this.quests = quests;
+      this.steps = steps;
+      this.history = history;
+      this.usedIds = usedIds;
+      this.redoStack = redoStack;
+      throw err;
+    }
+  }
   private undoHandlers: {
     [K in HistoryEntry["type"]]: (entry: Extract<HistoryEntry, { type: K }>) => {
       success: boolean;
@@ -533,11 +557,14 @@ export class QuestLog {
     const parent = this.quests.find((q) => q.id === id);
     if (!parent) throw new Error(formatNotFound(id));
     if (parent.done) throw new Error(formatParentDoneError(id));
-    const created: Step[] = [];
-    for (const desc of descriptions) {
-      created.push(this.addStep(desc, id));
-    }
-    return created;
+
+    return this.runTransaction(() => {
+      const created: Step[] = [];
+      for (const desc of descriptions) {
+        created.push(this.addStep(desc, id));
+      }
+      return created;
+    });
   }
 
   toggle(id: string): Quest | Step | null | undefined {
@@ -878,12 +905,16 @@ export class QuestLog {
               };
             }
           }
+          const descriptions = action.descriptions;
           try {
-            const added: { id: string; description: string }[] = [];
-            for (const desc of action.descriptions) {
-              const q = this.add(desc);
-              added.push({ id: q.id, description: q.description });
-            }
+            const added = this.runTransaction(() => {
+              const result: { id: string; description: string }[] = [];
+              for (const desc of descriptions) {
+                const q = this.add(desc);
+                result.push({ id: q.id, description: q.description });
+              }
+              return result;
+            });
 
             return { success: true, message: formatBatchAddResult(added) };
           } catch (err) {

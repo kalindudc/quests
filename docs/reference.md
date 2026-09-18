@@ -52,6 +52,10 @@
 }
 ```
 
+**Result view:**
+
+Tool results follow pi's compact view. A collapsed tool row shows the first 10 lines followed by a `... (N more lines, ctrl+o to expand)` hint; expanding the row (`app.tools.expand`, `ctrl+o` by default) shows the full quest list or document. This applies to quest listings and to plain-text results such as `rules`/`skill`.
+
 ## Command: `/quests`
 
 | Subcommand | Usage | Behavior |

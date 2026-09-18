@@ -15,8 +15,10 @@ export function formatQuestRow(
   const posWidth = visibleWidth(posText);
   const idText = `[${q.id}]`;
 
-  // spacing is added to keep text aligned
-  const spacing = " ".repeat(visibleWidth(`${16 ** idLength}`) - posWidth);
+  // Reserve width for the widest position label ("#" + up to `16 ** idLength`)
+  // and clamp so an unexpectedly wide label can never crash the renderer.
+  const posColWidth = visibleWidth(`#${16 ** idLength}`);
+  const spacing = " ".repeat(Math.max(0, posColWidth - posWidth));
   const idStr = `${theme.fg("muted", idText)} ${theme.fg(q.done ? "dim" : "accent", `${posText}`)}${spacing}`;
 
   // for steps, use a different marker and indent
@@ -36,8 +38,9 @@ export function formatQuestRow(
 
 export function formatStepSpacerLine(theme: Theme, idLength: number): string {
   const idTextLength = visibleWidth(`${16 ** idLength}`);
+  const posColWidth = visibleWidth(`#${16 ** idLength}`);
   // spacing for `[id](position string)`
-  const spacerStr = `${" ".repeat(idTextLength + 2)}${" ".repeat(idTextLength)}`;
+  const spacerStr = `${" ".repeat(idTextLength + 2)}${" ".repeat(posColWidth)}`;
 
   const marker = theme.fg("muted", " │   ");
 

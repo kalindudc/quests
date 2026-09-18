@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CONFIG } from "../../src/config.js";
 import { QuestLog } from "../../src/quest/dataplane.js";
 import { QUEST_ACTIONS } from "../../src/quest/types.js";
-import { renderQuestCall, renderQuestResult } from "../../src/renderers/tools.js";
+import {
+  COLLAPSED_PREVIEW_LINES,
+  renderQuestCall,
+  renderQuestResult,
+} from "../../src/renderers/tools.js";
 
 let randomCall = 0;
 beforeEach(() => {
@@ -19,6 +23,15 @@ afterEach(() => {
 });
 
 vi.mock("../../src/logger.js", () => ({ logger: { debug: vi.fn() } }));
+
+// keyHint reads pi's global theme/keybindings, which are only initialised inside a live TUI.
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    keyHint: (keybinding: string, description: string) => `${keybinding} ${description}`,
+  };
+});
 
 const mockTheme = {
   fg: (_name: string, text: string) => text,
@@ -244,5 +257,114 @@ describe("renderQuestResult", () => {
     expect(lines[subA2Idx + 1]).toBe("");
     expect(subA1Idx).toBe(parentAIdx + 2);
     expect(parentBIdx).toBe(subA2Idx + 2);
+  });
+
+  describe("collapsed vs expanded", () => {
+    const EXPAND_HINT = "app.tools.expand to expand";
+
+    function longQuestList(count: number): AgentToolResult<unknown> {
+      const log = new QuestLog();
+      for (let i = 1; i <= count; i++) log.add(`Quest ${i}`);
+      return { content: [{ type: "text", text: "" }], details: { quests: log.getAll() } };
+    }
+
+    it("collapsed view truncates a long quest list and appends the expand hint", () => {
+      const total = COLLAPSED_PREVIEW_LINES + 3;
+      const result = render(
+        longQuestList(total),
+        { expanded: false, isPartial: false },
+        mockTheme,
+        {},
+      );
+      const lines = getText(result).split("\n");
+
+      expect(lines).toHaveLength(COLLAPSED_PREVIEW_LINES + 1);
+      expect(lines[COLLAPSED_PREVIEW_LINES - 1]).toContain(`Quest ${COLLAPSED_PREVIEW_LINES}`);
+      expect(lines[COLLAPSED_PREVIEW_LINES]).toContain("... (3 more lines,");
+      expect(lines[COLLAPSED_PREVIEW_LINES]).toContain(EXPAND_HINT);
+      expect(getText(result)).not.toContain(`Quest ${total}`);
+    });
+
+    it("expanded view renders every quest without a hint", () => {
+      const total = COLLAPSED_PREVIEW_LINES + 3;
+      const result = render(
+        longQuestList(total),
+        { expanded: true, isPartial: false },
+        mockTheme,
+        {},
+      );
+      const text = getText(result);
+
+      expect(text.split("\n")).toHaveLength(total);
+      expect(text).toContain(`Quest ${total}`);
+      expect(text).not.toContain("more lines");
+      expect(text).not.toContain(EXPAND_HINT);
+    });
+
+    it("collapsed view renders a short quest list in full without a hint", () => {
+      const result = render(
+        longQuestList(COLLAPSED_PREVIEW_LINES),
+        { expanded: false, isPartial: false },
+        mockTheme,
+        {},
+      );
+      const text = getText(result);
+
+      expect(text.split("\n")).toHaveLength(COLLAPSED_PREVIEW_LINES);
+      expect(text).toContain(`Quest ${COLLAPSED_PREVIEW_LINES}`);
+      expect(text).not.toContain(EXPAND_HINT);
+    });
+
+    it("counts spacer and separator lines of step groups as rendered lines", () => {
+      // 3 parents x (parent + spacer + 2 steps) + 2 blank separators = 14 lines
+      const log = new QuestLog();
+      for (let i = 1; i <= 3; i++) {
+        const parent = log.add(`Parent ${i}`);
+        log.addStep(`Step ${i}a`, parent.id);
+        log.addStep(`Step ${i}b`, parent.id);
+      }
+      const toolResult: AgentToolResult<unknown> = {
+        content: [{ type: "text", text: "" }],
+        details: { quests: log.getAll() },
+      };
+
+      const collapsed = getText(
+        render(toolResult, { expanded: false, isPartial: false }, mockTheme, {}),
+      );
+      const expanded = getText(
+        render(toolResult, { expanded: true, isPartial: false }, mockTheme, {}),
+      );
+
+      expect(expanded.split("\n")).toHaveLength(14);
+      expect(collapsed.split("\n")).toHaveLength(COLLAPSED_PREVIEW_LINES + 1);
+      expect(collapsed).toContain(`... (${14 - COLLAPSED_PREVIEW_LINES} more lines,`);
+      expect(collapsed).not.toContain("Parent 3");
+    });
+
+    it("collapses long plain-text results such as the skill document", () => {
+      const total = COLLAPSED_PREVIEW_LINES + 5;
+      const doc = Array.from({ length: total }, (_, i) => `Rule ${i + 1}`).join("\n");
+      const toolResult: AgentToolResult<unknown> = {
+        content: [{ type: "text", text: doc }],
+        details: { quests: [], displayQuests: [] },
+      };
+
+      const collapsed = getText(
+        render(toolResult, { expanded: false, isPartial: false }, mockTheme, {}),
+      );
+      const expanded = getText(
+        render(toolResult, { expanded: true, isPartial: false }, mockTheme, {}),
+      );
+
+      expect(collapsed.split("\n")).toHaveLength(COLLAPSED_PREVIEW_LINES + 1);
+      expect(collapsed).toContain("Rule 1");
+      expect(collapsed).not.toContain(`Rule ${total}`);
+      expect(collapsed).toContain("... (5 more lines,");
+      expect(collapsed).toContain(EXPAND_HINT);
+
+      expect(expanded.split("\n")).toHaveLength(total);
+      expect(expanded).toContain(`Rule ${total}`);
+      expect(expanded).not.toContain(EXPAND_HINT);
+    });
   });
 });

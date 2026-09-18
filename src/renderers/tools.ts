@@ -1,4 +1,4 @@
-import type { AgentToolResult, Theme } from "@earendil-works/pi-coding-agent";
+import { type AgentToolResult, keyHint, type Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { ResolvedConfig } from "../config.js";
 import { logger } from "../logger.js";
@@ -14,6 +14,28 @@ type QuestArgs = {
   ids?: string[];
   all?: boolean;
 };
+
+/**
+ * Maximum number of result lines shown while a tool row is collapsed.
+ * Matches pi's default fallback preview so quest output behaves like built-in tools.
+ */
+export const COLLAPSED_PREVIEW_LINES = 10;
+
+/**
+ * Applies pi's standard compact-view treatment: the collapsed view shows a preview and an
+ * expand hint (`app.tools.expand`, ctrl+o by default); the expanded view shows every line.
+ */
+function collapseLines(lines: string[], expanded: boolean, theme: Theme): string {
+  if (expanded || lines.length <= COLLAPSED_PREVIEW_LINES) return lines.join("\n");
+
+  const displayLines = lines.slice(0, COLLAPSED_PREVIEW_LINES);
+  const remaining = lines.length - displayLines.length;
+  const hint =
+    theme.fg("muted", `... (${remaining} more lines,`) +
+    ` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+
+  return `${displayLines.join("\n")}\n${hint}`;
+}
 
 export function renderQuestCall(args: QuestArgs, theme: Theme, _context: unknown): Text {
   const id = "id" in args ? args.id : undefined;
@@ -88,8 +110,12 @@ export function renderQuestResult(config: ResolvedConfig) {
       questsToRender.length === 0 ||
       !Array.isArray(allQuests)
     ) {
-      const text = result.content.map((c) => (c.type === "text" ? c.text : "[image]")).join("\n");
-      return new Text(theme.fg("text", text), 0, 0);
+      const textLines = result.content
+        .map((c) => (c.type === "text" ? c.text : "[image]"))
+        .join("\n")
+        .split("\n")
+        .map((line) => theme.fg("text", line));
+      return new Text(collapseLines(textLines, options.expanded, theme), 0, 0);
     }
 
     const quests = allQuests;
@@ -134,6 +160,6 @@ export function renderQuestResult(config: ResolvedConfig) {
       }
     }
 
-    return new Text(lines.join("\n"), 0, 0);
+    return new Text(collapseLines(lines, options.expanded, theme), 0, 0);
   };
 }
