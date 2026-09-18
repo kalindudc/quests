@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-17
+
 - feat: quest tool results follow pi's compact view — collapsed rows show a 10-line preview with a `ctrl+o` (`app.tools.expand`) hint, expanded rows show everything
+- fix: RangeError crash when position labels exceed the reserved column width in `formatQuestRow`
+- fix: wrap batch add and split in a `runTransaction` guard to roll back partial state on ID exhaustion
 
 ## [0.8.0] - 2026-05-26
 

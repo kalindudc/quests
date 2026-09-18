@@ -1,6 +1,6 @@
 {
   "name": "pi-quests",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "A quest-log for your pi. Keep your agent on track, one quest at a time.",
   "type": "module",
   "keywords": [
