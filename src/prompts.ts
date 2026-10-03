@@ -9,10 +9,10 @@ export function getQuestSkillDocument(): string {
 }
 
 export const QUEST_PROMPT_REMINDER = [
-  "Use the quest tool VERY frequently to track tasks, plans, and progress.",
+  "Use the quest tool to track tasks, plans, and progress, alongside your work rather than in turns of its own.",
   "Before reading files or making edits, ensure work is tracked as specific, actionable quests.",
   "Break broad requests into concrete, independent quests. Use split to break quests into steps for multi-step tasks. When the user gives a list of tasks, add them as quests immediately.",
-  "Toggle quests done as you complete them. Do NOT batch completions.",
+  "Toggle a quest done as soon as you finish it, in the same message as your next action. Do not save completions for the end.",
   "ALWAYS use the toggle action for completion. NEVER append completion markers via update.",
   "A parent quest cannot be toggled done until all its steps are complete.",
   "Always use the hex ID shown in brackets (e.g. 0a, ff) for actions, never the positional number.",
