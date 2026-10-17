@@ -51,8 +51,8 @@ Available /quests subcommands:
 [bb](https://getbb.app) runs coding-agent threads with several agent providers, and this repository is also a bb plugin. Install it from Git, or from a local checkout after running `npm ci --ignore-scripts` in it. Do not install it from npm: the npm package contains only the pi extension, so `bb plugin install npm:pi-quests` would find no bb entry files.
 
 ```bash
-bb plugin install git:https://github.com/kalindudc/pi-quests
-bb plugin install path:/path/to/pi-quests
+bb plugin install git:https://github.com/kalindudc/quests
+bb plugin install path:/path/to/quests
 ```
 
 Update pi-quests in pi first with `pi update`, then install the plugin. pi-quests 0.9.0 and earlier register the same `quest` tool as the plugin, and pi refuses to start a bb thread that loads both.

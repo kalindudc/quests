@@ -6,6 +6,7 @@
 - fix: the pi system prompt told agents that had quests that there were none, and gave an empty log only a weak nudge
 - fix: a pi session saved by pi-quests 0.1 to 0.3 starts with an empty quest log and a notice, instead of loading quests whose numeric ids no tool or command could address
 - chore: reorganize the repository as one package that is both the pi package and the bb plugin: the quest engine stays in `src/`, the pi extension moves to `extensions/pi/`, the bb plugin lives in `extensions/bb/`, and tests mirror them in `test/core/`, `test/pi/` and `test/bb/`; the stale `pnpm-lock.yaml` is gone, as the repository uses npm only
+- chore: the repository moved to github.com/kalindudc/quests; the npm package is still pi-quests, and the old URL redirects
 
 ## [0.9.0] - 2026-09-17
 
