@@ -260,7 +260,7 @@ The `quest` tool registration also supplies `promptSnippet` and `promptGuideline
 
 ## bb thread state
 
-The plugin in `extensions/bb/` runs the same engine inside bb, the getbb.app workspace for agent threads, so a thread on any agent provider gets the `quest` tool. `extensions/bb/server.ts` registers that tool and two RPC methods, `getLog` and `mutate`, for the frontend in `extensions/bb/app.tsx`, which adds a Quests tab to the thread's side panel and a progress chip to the thread header. Both paths go through `extensions/bb/store.ts`, so the tool and the tab edit one log. The server reads no files: bb loads `src/skills/quest-management/SKILL.md` as a plugin skill, and the `skill` and `rules` actions point to it.
+The plugin in `extensions/bb/` runs the same engine inside bb, the getbb.app workspace for agent threads, so a thread on any agent provider gets the `quest` tool. `extensions/bb/server.ts` registers that tool and two RPC methods, `getLog` and `mutate`, for the frontend in `extensions/bb/app.tsx`, which adds a Quests tab to the thread's side panel and a progress chip to the action row of the thread's prompt box, beside voice and send. The chip shows done and total counts, lists up to five open quests on hover, and opens the Quests tab when clicked. Both paths go through `extensions/bb/store.ts`, so the tool and the tab edit one log. The server reads no files: bb loads `src/skills/quest-management/SKILL.md` as a plugin skill, and the `skill` and `rules` actions point to it.
 
 The store keeps each thread's state in bb's thread metadata under the fixed namespace `quests` rather than the plugin id, so other plugins can read the progress and a package rename keeps every thread's quests:
 

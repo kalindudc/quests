@@ -1,7 +1,8 @@
-import type { PluginThreadHeaderActionProps, PluginThreadPanelProps } from "@get-bb/plugin-sdk";
+import type { PluginThreadPanelProps } from "@get-bb/plugin-sdk";
 import {
   definePluginApp,
   useBbNavigate,
+  useComposer,
   useRealtime,
   useRealtimeConnectionState,
   useRpc,
@@ -12,6 +13,12 @@ import { Button } from "./components/ui/button.js";
 import { Checkbox } from "./components/ui/checkbox.js";
 import { Icon } from "./components/ui/icon.js";
 import { Input } from "./components/ui/input.js";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./components/ui/tooltip.js";
 import { cn } from "./lib/utils.js";
 import type { rpcContract } from "./server.js";
 import type { QuestMutation, QuestView } from "./store.js";
@@ -468,7 +475,49 @@ function QuestsPanel({ threadId }: PluginThreadPanelProps) {
   );
 }
 
-function QuestChip({ threadId, isCompactViewport }: PluginThreadHeaderActionProps) {
+const SUMMARY_LIMIT = 5;
+
+function QuestSummary({ view, error }: { view: QuestView | null; error: string | null }) {
+  if (error !== null) return <p>Quests could not load: {error}</p>;
+  if (view === null) return <p>Loading quests…</p>;
+  const { done, total } = view.progress;
+  if (total === 0) return <p>No quests yet</p>;
+
+  const open = view.quests.filter((quest): quest is Quest => !("parentId" in quest) && !quest.done);
+  const stepsOf = (id: string) =>
+    view.quests.filter((quest) => "parentId" in quest && quest.parentId === id);
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="font-medium">
+        {done} of {total} done
+      </p>
+      {open.length === 0 ? <p>All quests done</p> : null}
+      {open.length > 0 ? (
+        <ul className="flex flex-col gap-0.5">
+          {open.slice(0, SUMMARY_LIMIT).map((quest) => {
+            const steps = stepsOf(quest.id);
+            return (
+              <li key={quest.id} className="flex min-w-0 items-center gap-1.5">
+                <Icon name="Circle" aria-hidden className="size-3 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{quest.description}</span>
+                {steps.length > 0 ? (
+                  <span className="shrink-0 tabular-nums opacity-70">
+                    {steps.filter((step) => step.done).length}/{steps.length}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {open.length > SUMMARY_LIMIT ? (
+        <p className="opacity-70">+{open.length - SUMMARY_LIMIT} more</p>
+      ) : null}
+    </div>
+  );
+}
+
+function QuestChip({ threadId }: { threadId: string }) {
   const { view, error } = useQuestLog(threadId);
   const navigate = useBbNavigate();
   const progress = view?.progress;
@@ -482,18 +531,40 @@ function QuestChip({ threadId, isCompactViewport }: PluginThreadHeaderActionProp
   }
 
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      aria-label={label}
-      className={cn("h-7 gap-1.5 px-2 tabular-nums", !active && "text-muted-foreground")}
-      onClick={() => navigate.openThreadPanel({ actionId: "quests" })}
-    >
-      <Icon name={error === null ? "ListTodo" : "AlertCircle"} aria-hidden className="size-4" />
-      {active ? `${progress.done}/${progress.total}` : isCompactViewport ? null : "quests"}
-    </Button>
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label={label}
+            className={cn(
+              "h-8 gap-1.5 px-2 tabular-nums max-md:pointer-coarse:h-10",
+              !active && "text-muted-foreground",
+            )}
+            onClick={() => navigate.openThreadPanel({ actionId: "quests" })}
+          >
+            <Icon
+              name={error === null ? "ListTodo" : "AlertCircle"}
+              aria-hidden
+              className="size-4"
+            />
+            {active ? `${progress.done}/${progress.total}` : null}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="w-64">
+          <QuestSummary view={view} error={error} />
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
+}
+
+/** The composer action has no props; the thread comes from the composer it is mounted in. */
+function QuestComposerChip() {
+  const { scope } = useComposer();
+  return scope.kind === "thread" ? <QuestChip threadId={scope.threadId} /> : null;
 }
 
 export default definePluginApp((app) => {
@@ -503,9 +574,9 @@ export default definePluginApp((app) => {
     icon: "ListTodo",
     component: QuestsPanel,
   });
-  app.slots.experimental_threadHeaderAction({
-    id: "quests-progress",
-    title: "Quest progress",
-    component: QuestChip,
+  app.composer.customize({
+    id: "quests",
+    scopes: ["thread"],
+    actions: [{ id: "quests-progress", component: QuestComposerChip }],
   });
 });

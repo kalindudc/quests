@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { PluginThreadHeaderActionProps, PluginThreadPanelProps } from "@get-bb/plugin-sdk";
+import type { PluginComposerScope, PluginThreadPanelProps } from "@get-bb/plugin-sdk";
 import { loadPluginApp, type RenderedSlot, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -83,14 +83,17 @@ async function renderPanel(server: ReturnType<typeof backend>) {
   return slot;
 }
 
-async function renderChip(server: ReturnType<typeof backend>, isCompactViewport = false) {
+async function renderChip(
+  server: ReturnType<typeof backend>,
+  scope: PluginComposerScope = { kind: "thread", threadId: "t1" },
+) {
   const app = await loadApp();
-  const chip = app.threadHeaderActions[0];
+  const chip = app.composerCustomizations[0]?.actions?.[0];
   if (!chip) throw new Error("quest chip is not registered");
-  const slot = renderSlot<PluginThreadHeaderActionProps, typeof rpcContract>(
+  const slot = renderSlot<object, typeof rpcContract>(
     chip,
-    { threadId: "t1", projectId: "p1", isCompactViewport },
-    { rpc: server.rpc, openThreadPanel: () => true },
+    {},
+    { rpc: server.rpc, openThreadPanel: () => true, composer: { scope } },
   );
   slots.push(slot);
   return slot;
@@ -109,15 +112,20 @@ async function settled(slot: RenderedSlot): Promise<void> {
 }
 
 describe("quests app registration", () => {
-  it("registers the Quests tab and the progress chip", async () => {
+  it("registers the Quests tab and puts the progress chip in thread composers", async () => {
     const app = await loadApp();
 
     expect(app.threadPanelActions.map(({ id, title }) => ({ id, title }))).toEqual([
       { id: "quests", title: "Quests" },
     ]);
-    expect(app.threadHeaderActions.map(({ id, title }) => ({ id, title }))).toEqual([
-      { id: "quests-progress", title: "Quest progress" },
-    ]);
+    expect(
+      app.composerCustomizations.map(({ id, scopes, actions }) => ({
+        id,
+        scopes,
+        actions: actions?.map((action) => action.id),
+      })),
+    ).toEqual([{ id: "quests", scopes: ["thread"], actions: ["quests-progress"] }]);
+    expect(app.threadHeaderActions).toEqual([]);
   });
 });
 
@@ -364,21 +372,76 @@ describe("Quests tab", () => {
   });
 });
 
+function open(title: string, done = false): Quest {
+  return { id: title, description: title, done, createdAt: 1 };
+}
+
+async function hover(slot: RenderedSlot, chip: HTMLElement): Promise<string> {
+  fireEvent.pointerMove(chip);
+  return (await slot.findByRole("tooltip")).textContent ?? "";
+}
+
 describe("quest progress chip", () => {
-  it("is muted and says quests while the thread has none", async () => {
+  it("is a muted icon while the thread has no quests", async () => {
     const slot = await renderChip(backend(EMPTY));
 
     const chip = await slot.findByRole("button", { name: "No quests yet. Open quests" });
-    expect(chip.textContent).toBe("quests");
+    expect(chip.textContent).toBe("");
     expect(chip.className).toContain("text-muted-foreground");
+    expect(await hover(slot, chip)).toBe("No quests yet");
   });
 
-  it("drops the label at compact widths", async () => {
-    const slot = await renderChip(backend(EMPTY), true);
+  it("summarizes the open quests and their steps on hover", async () => {
+    const slot = await renderChip(backend(LOG));
 
-    expect(
-      (await slot.findByRole("button", { name: "No quests yet. Open quests" })).textContent,
-    ).toBe("");
+    const summary = await hover(
+      slot,
+      await slot.findByRole("button", { name: /^1 of 3 quests done/ }),
+    );
+
+    expect(summary).toContain("1 of 3 done");
+    expect(summary).toContain("Parent0/1");
+    expect(summary).not.toContain("Other");
+  });
+
+  it("lists at most five open quests and counts the rest", async () => {
+    const names = ["A", "B", "C", "D", "E", "F", "G"];
+    const slot = await renderChip(backend(viewOf(...names.map((name) => open(name)))));
+
+    const summary = await hover(slot, await slot.findByRole("button", { name: /^0 of 7/ }));
+
+    expect(summary).toContain("ABCDE");
+    expect(summary).not.toContain("F");
+    expect(summary).toContain("+2 more");
+  });
+
+  it("says when every quest is done", async () => {
+    const slot = await renderChip(backend(viewOf(open("A", true), open("B", true))));
+
+    const chip = await slot.findByRole("button", { name: "2 of 2 quests done. Open quests" });
+
+    expect(await hover(slot, chip)).toBe("2 of 2 doneAll quests done");
+  });
+
+  it("shows a log that failed to load", async () => {
+    const server = backend(LOG);
+    server.rpc.getLog = () => {
+      throw new Error("metadata unavailable");
+    };
+    const slot = await renderChip(server);
+
+    const chip = await slot.findByRole("button", {
+      name: "Quests could not load: metadata unavailable. Open quests",
+    });
+
+    expect(await hover(slot, chip)).toBe("Quests could not load: metadata unavailable");
+  });
+
+  it("renders nothing outside a thread composer", async () => {
+    const slot = await renderChip(backend(LOG), { kind: "new-thread", projectId: "p1" });
+
+    expect(slot.queryByRole("button")).toBeNull();
+    expect(slot.inspection.rpcCalls).toEqual([]);
   });
 
   it("shows quest and step progress and refreshes on its thread's signal", async () => {

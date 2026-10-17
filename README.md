@@ -57,7 +57,7 @@ bb plugin install path:/path/to/quests
 
 Update pi-quests in pi first with `pi update`, then install the plugin. pi-quests 0.9.0 and earlier register the same `quest` tool as the plugin, and pi refuses to start a bb thread that loads both.
 
-Every bb thread then gets one `quest` tool, whichever provider runs it, a Quests tab in the thread's side panel, and a progress chip in the thread header. Each thread keeps its own quests across bb restarts, and a forked thread starts with a copy of its source's quests. In bb's pi threads the pi extension steps aside, so the agent sees one quest tool; plain pi and pi under Herdr work as before.
+Every bb thread then gets one `quest` tool, whichever provider runs it, a Quests tab in the thread's side panel, and a progress chip in the prompt box's action row that summarizes the open quests on hover. Each thread keeps its own quests across bb restarts, and a forked thread starts with a copy of its source's quests. In bb's pi threads the pi extension steps aside, so the agent sees one quest tool; plain pi and pi under Herdr work as before.
 
 ## Configuration
 
