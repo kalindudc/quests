@@ -46,6 +46,18 @@ Available /quests subcommands:
 ![Quests toggle](docs/assets/quests_toggle.png)
 ![Quests view](docs/assets/quests_view.png)
 
+## In bb
+
+[bb](https://getbb.app) runs coding-agent threads with several agent providers, and this repository is also a bb plugin. Install it from Git, or from a local checkout after running `npm ci --ignore-scripts` in it. Do not install it from npm: the npm package contains only the pi extension, so `bb plugin install npm:pi-quests` would find no bb entry files.
+
+```bash
+bb plugin install git:https://github.com/kalindudc/pi-quests
+bb plugin install path:/path/to/pi-quests
+```
+
+Update pi-quests in pi first with `pi update`, then install the plugin. pi-quests 0.9.0 and earlier register the same `quest` tool as the plugin, and pi refuses to start a bb thread that loads both.
+
+Every bb thread then gets one `quest` tool, whichever provider runs it, a Quests tab in the thread's side panel, and a progress chip in the thread header. Each thread keeps its own quests across bb restarts, and a forked thread starts with a copy of its source's quests. In bb's pi threads the pi extension steps aside, so the agent sees one quest tool; plain pi and pi under Herdr work as before.
 
 ## Configuration
 
@@ -64,6 +76,16 @@ pi-quests reads configuration from pi's settings files. Global settings live at 
 ```
 
 See [docs/configuration.md](docs/configuration.md) for the full options reference.
+
+## Develop
+
+```bash
+npm ci
+```
+
+- Install the checkout into bb once with `bb plugin install path:$PWD`, then run `bb plugin dev $PWD` while you work. It rebuilds and reloads the plugin on every save anywhere in the repository except `dist/`, `node_modules/` and `.git/`, so saves in `tmp/` count too. Without it, `bb plugin reload pi-quests` rebuilds from the current files.
+- bb applies tool and instruction changes when a thread starts a new provider session, so test those in a new thread.
+- pi sessions started in this checkout load `extensions/pi` from the working tree, because `.pi/settings.json` points there.
 
 ## Documentation
 

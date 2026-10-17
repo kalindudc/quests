@@ -1,13 +1,3 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-export function getQuestSkillDocument(): string {
-  return readFileSync(join(__dirname, "prompts", "skill.md"), "utf-8");
-}
-
 export const QUEST_PROMPT_REMINDER = [
   "Use the quest tool to track tasks, plans, and progress, alongside your work rather than in turns of its own.",
   "Before reading files or making edits, ensure work is tracked as specific, actionable quests.",

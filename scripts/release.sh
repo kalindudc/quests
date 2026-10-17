@@ -71,7 +71,7 @@ UNEXPECTED=""
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   case "$file" in
-    package.json|package-lock.json|pnpm-lock.yaml|CHANGELOG.md|README.md|AGENTS.md|docs/*|scripts/*|.pi/prompts/release.md) ;;
+    package.json|package-lock.json|CHANGELOG.md|README.md|AGENTS.md|docs/*|scripts/*|.pi/prompts/release.md) ;;
     *) UNEXPECTED="${UNEXPECTED}  ${file}"$'\n' ;;
   esac
 done < <(git status --porcelain | awk '{print $2}' | sort)
@@ -91,9 +91,6 @@ fi
 
 # re-generate package-lock.json to ensure it matches package.json
 npm install
-if command -v pnpm >/dev/null 2>&1; then
-  pnpm install
-fi
 
 # Show what will be committed
 echo "Changes to be committed:"

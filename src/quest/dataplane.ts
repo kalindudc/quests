@@ -1,7 +1,4 @@
-import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_CONFIG, type ResolvedConfig } from "../config.js";
-import { logger } from "../logger.js";
-import { getQuestSkillDocument } from "../prompts.js";
+import { DEFAULT_CONFIG, type ResolvedConfig } from "./defaults.js";
 import {
   formatAddResult,
   formatBatchAddResult,
@@ -92,6 +89,23 @@ export type RedoEntry =
   | { type: typeof QUEST_ACTIONS.reorder; id: string; targetId: string }
   | { type: typeof QUEST_ACTIONS.reparent; id: string; parentId?: string };
 
+export type QuestLogOptions = {
+  skillDocument?: string;
+  debug?: (namespace: string, event: string, meta?: Record<string, unknown>) => void;
+};
+
+export type QuestLogState = {
+  version: typeof QUEST_LOG_STATE_VERSION;
+  quests: Quest[];
+  steps: Step[];
+  usedIds: string[];
+  history: HistoryEntry[];
+  redoStack: RedoEntry[];
+};
+
+const QUEST_LOG_STATE_VERSION = 1;
+const PERSISTED_STACK_LIMIT = 50;
+
 export type QuestOperationResult = {
   success: boolean;
   message: string;
@@ -123,15 +137,62 @@ export class QuestLog {
 
   private readonly ID_LENGTH: number;
   private readonly MAX_IDS: number;
+  private readonly skillDocument: string | undefined;
+  private readonly debug: NonNullable<QuestLogOptions["debug"]>;
 
-  constructor(config: ResolvedConfig = DEFAULT_CONFIG) {
+  constructor(config: ResolvedConfig = DEFAULT_CONFIG, options: QuestLogOptions = {}) {
     this.ID_LENGTH = config.ids.length;
     this.MAX_IDS = 16 ** this.ID_LENGTH;
+    this.skillDocument = options.skillDocument;
+    this.debug = options.debug ?? (() => {});
+  }
+
+  static fromJSON(state: unknown, config?: ResolvedConfig, options?: QuestLogOptions): QuestLog {
+    const log = new QuestLog(config, options);
+    log.restore(state);
+    return log;
+  }
+
+  /*
+   * Returns a deep, strict-JSON copy of the log. Undo and redo keep only their newest
+   * PERSISTED_STACK_LIMIT entries so stored state stays bounded; the in-memory stacks do not.
+   */
+  toJSON(): QuestLogState {
+    const state: QuestLogState = {
+      version: QUEST_LOG_STATE_VERSION,
+      quests: this.quests,
+      steps: this.steps,
+      usedIds: [...this.usedIds],
+      history: this.history.slice(-PERSISTED_STACK_LIMIT),
+      redoStack: this.redoStack.slice(-PERSISTED_STACK_LIMIT),
+    };
+    return JSON.parse(JSON.stringify(state)) as QuestLogState;
+  }
+
+  /*
+   * Replaces the whole log with a copy of `state`. Malformed input throws before any field
+   * changes, so a failed restore leaves the current log intact.
+   */
+  restore(state: unknown): void {
+    const decoded = decodeQuestLogState(state);
+    relinkHistory(decoded);
+    this.quests = decoded.quests;
+    this.steps = decoded.steps;
+    this.usedIds = new Set(decoded.usedIds);
+    this.history = decoded.history;
+    this.redoStack = decoded.redoStack;
+    this.inRedo = false;
+    this.debug("quests:state", "restore", {
+      quests: this.quests.length,
+      steps: this.steps.length,
+      history: this.history.length,
+      redo: this.redoStack.length,
+    });
   }
 
   private generateId(): string {
     if (this.usedIds.size >= this.MAX_IDS) {
-      logger.debug("quests:state", "generate-id-exhausted", { usedIds: this.usedIds.size });
+      this.debug("quests:state", "generate-id-exhausted", { usedIds: this.usedIds.size });
       throw new Error("No available quest IDs. Clear done or all quests to free up IDs.");
     }
 
@@ -181,7 +242,7 @@ export class QuestLog {
       this.steps = this.steps.filter((q) => q.id !== entry.id);
       this.usedIds.delete(entry.id);
 
-      logger.debug("quests:state", "revert-add", {
+      this.debug("quests:state", "revert-add", {
         id: entry.id,
         total: this.quests.length + this.steps.length,
       });
@@ -192,7 +253,7 @@ export class QuestLog {
       const missingId = entry.ids.find((_, index) => !quests[index]);
 
       if (missingId) {
-        logger.debug("quests:state", "revert-toggle-not-found", { ids: entry.ids, missingId });
+        this.debug("quests:state", "revert-toggle-not-found", { ids: entry.ids, missingId });
         return { success: false, message: formatNotFound(missingId) };
       }
 
@@ -201,7 +262,7 @@ export class QuestLog {
         quest.done = !quest.done;
       }
 
-      logger.debug("quests:state", "revert-toggle", {
+      this.debug("quests:state", "revert-toggle", {
         ids: entry.ids,
         done: resolvedQuests.map((quest) => quest.done),
       });
@@ -217,11 +278,11 @@ export class QuestLog {
       const quest = this.findById(entry.id);
       if (quest) {
         quest.description = entry.previousDescription;
-        logger.debug("quests:state", "revert-update", { id: entry.id });
+        this.debug("quests:state", "revert-update", { id: entry.id });
         return { success: true, message: `Reverted update for quest [${entry.id}]` };
       }
 
-      logger.debug("quests:state", "revert-update-not-found", { id: entry.id });
+      this.debug("quests:state", "revert-update-not-found", { id: entry.id });
       return { success: false, message: formatNotFound(entry.id) };
     },
     [QUEST_ACTIONS.delete]: (entry) => {
@@ -229,7 +290,7 @@ export class QuestLog {
       this.steps = [...entry.previousSteps];
       this.usedIds = new Set([...this.quests, ...this.steps].map((quest) => quest.id));
 
-      logger.debug("quests:state", "revert-delete", {
+      this.debug("quests:state", "revert-delete", {
         ids: entry.deletedIds,
         total: this.quests.length + this.steps.length,
       });
@@ -446,7 +507,7 @@ export class QuestLog {
     for (const id of normalizedIds) {
       const quest = this.findById(id);
       if (!quest) {
-        logger.debug("quests:state", "toggle-not-found", { id });
+        this.debug("quests:state", "toggle-not-found", { id });
         return { error: "notFound", id };
       }
       quests.push(quest);
@@ -463,7 +524,7 @@ export class QuestLog {
       });
 
       if (hasIncompleteSteps) {
-        logger.debug("quests:state", "toggle-blocked-steps", { id: quest.id, ids: normalizedIds });
+        this.debug("quests:state", "toggle-blocked-steps", { id: quest.id, ids: normalizedIds });
         return { error: "blocked", id: quest.id };
       }
     }
@@ -477,7 +538,7 @@ export class QuestLog {
     }
 
     this.history.push({ type: QUEST_ACTIONS.toggle, ids });
-    logger.debug("quests:state", QUEST_ACTIONS.toggle, {
+    this.debug("quests:state", QUEST_ACTIONS.toggle, {
       ids,
       total: this.quests.length + this.steps.length,
     });
@@ -512,7 +573,7 @@ export class QuestLog {
     this.quests.push(quest);
     this.history.push({ type: QUEST_ACTIONS.add, id: quest.id });
 
-    logger.debug("quests:state", QUEST_ACTIONS.add, {
+    this.debug("quests:state", QUEST_ACTIONS.add, {
       id: quest.id,
       description,
       total: this.quests.length,
@@ -541,7 +602,7 @@ export class QuestLog {
     };
     this.steps.push(step);
     this.history.push({ type: QUEST_ACTIONS.add, id: step.id, parentId });
-    logger.debug("quests:state", "add-step", {
+    this.debug("quests:state", "add-step", {
       id: step.id,
       parentId,
       description,
@@ -580,14 +641,14 @@ export class QuestLog {
     if (!this.inRedo) this.redoStack = [];
     const quest = this.findById(id);
     if (!quest) {
-      logger.debug("quests:state", "update-not-found", { id });
+      this.debug("quests:state", "update-not-found", { id });
       return undefined;
     }
 
     this.history.push({ type: QUEST_ACTIONS.update, id, previousDescription: quest.description });
     quest.description = description;
 
-    logger.debug("quests:state", QUEST_ACTIONS.update, {
+    this.debug("quests:state", QUEST_ACTIONS.update, {
       id,
       description,
       total: this.quests.length + this.steps.length,
@@ -605,7 +666,7 @@ export class QuestLog {
     for (const id of normalizedIds) {
       const quest = this.findById(id);
       if (!quest) {
-        logger.debug("quests:state", "delete-not-found", { id });
+        this.debug("quests:state", "delete-not-found", { id });
         return { error: "notFound", id };
       }
 
@@ -619,7 +680,7 @@ export class QuestLog {
         (step) => !step.done && !selectedIds.has(step.id),
       );
       if (hasUnselectedIncompleteStep) {
-        logger.debug("quests:state", "delete-blocked-steps", { id: quest.id, ids: normalizedIds });
+        this.debug("quests:state", "delete-blocked-steps", { id: quest.id, ids: normalizedIds });
         return { error: "blocked", id: quest.id };
       }
 
@@ -649,7 +710,7 @@ export class QuestLog {
       previousSteps,
     });
 
-    logger.debug("quests:state", QUEST_ACTIONS.delete, {
+    this.debug("quests:state", QUEST_ACTIONS.delete, {
       ids,
       deletedIds,
       total: this.quests.length + this.steps.length,
@@ -702,7 +763,7 @@ export class QuestLog {
         all: false,
       });
       const count = done.length + removedSteps.length;
-      logger.debug("quests:state", QUEST_ACTIONS.clear, { count, all });
+      this.debug("quests:state", QUEST_ACTIONS.clear, { count, all });
       return count;
     }
     const count = this.quests.length + this.steps.length;
@@ -715,25 +776,25 @@ export class QuestLog {
     this.quests = [];
     this.steps = [];
     this.usedIds.clear();
-    logger.debug("quests:state", QUEST_ACTIONS.clear, { count, all });
+    this.debug("quests:state", QUEST_ACTIONS.clear, { count, all });
     return count;
   }
 
   reorder(id: string, targetId: string): Quest | undefined {
     if (!this.inRedo) this.redoStack = [];
     if (this.steps.some((step) => step.id === id || step.id === targetId)) {
-      logger.debug("quests:state", "reorder-step-rejected", { id, targetId });
+      this.debug("quests:state", "reorder-step-rejected", { id, targetId });
       return undefined;
     }
     const idx = this.quests.findIndex((q) => q.id === id);
     if (idx === -1) {
-      logger.debug("quests:state", "reorder-not-found", { id });
+      this.debug("quests:state", "reorder-not-found", { id });
       return undefined;
     }
 
     const targetIdx = this.quests.findIndex((q) => q.id === targetId);
     if (targetIdx === -1) {
-      logger.debug("quests:state", "reorder-target-not-found", { id, targetId });
+      this.debug("quests:state", "reorder-target-not-found", { id, targetId });
       return undefined;
     }
 
@@ -751,7 +812,7 @@ export class QuestLog {
 
     this.quests.splice(insertIndex, 0, quest);
     this.history.push({ type: QUEST_ACTIONS.reorder, quest, oldIndex: idx, previousIds, targetId });
-    logger.debug("quests:state", QUEST_ACTIONS.reorder, {
+    this.debug("quests:state", QUEST_ACTIONS.reorder, {
       id: quest.id,
       targetId,
       total: this.quests.length + this.steps.length,
@@ -808,7 +869,7 @@ export class QuestLog {
       this.history.push({ type: QUEST_ACTIONS.reparent, id, previousParentId });
     }
 
-    logger.debug("quests:state", QUEST_ACTIONS.reparent, {
+    this.debug("quests:state", QUEST_ACTIONS.reparent, {
       id,
       parentId,
       total: this.quests.length + this.steps.length,
@@ -820,11 +881,11 @@ export class QuestLog {
   undo(): QuestOperationResult {
     const entry = this.history.pop();
     if (!entry) {
-      logger.debug("quests:state", "undo-empty");
+      this.debug("quests:state", "undo-empty");
       return { success: false, message: formatNothingToUndoError() };
     }
 
-    logger.debug("quests:state", "undo", { type: entry.type });
+    this.debug("quests:state", "undo", { type: entry.type });
     this.redoStack.push(this.buildRedoEntry(entry));
 
     const handler = this.undoHandlers[entry.type];
@@ -832,7 +893,7 @@ export class QuestLog {
       return handler(entry as never);
     }
 
-    logger.debug("quests:state", "undo-unknown", { type: (entry as { type: string }).type });
+    this.debug("quests:state", "undo-unknown", { type: (entry as { type: string }).type });
     return { success: false, message: "Unknown history entry" };
   }
 
@@ -1081,7 +1142,10 @@ export class QuestLog {
       }
       case QUEST_ACTIONS.rules:
       case QUEST_ACTIONS.skill: {
-        return { success: true, message: getQuestSkillDocument() };
+        if (this.skillDocument === undefined) {
+          throw new Error("QuestLog needs a skill document for the skill and rules actions");
+        }
+        return { success: true, message: this.skillDocument };
       }
       case QUEST_ACTIONS.undo: {
         return this.undo();
@@ -1097,61 +1161,206 @@ export class QuestLog {
       }
     }
   }
+}
 
-  reconstructFromSession(ctx: ExtensionContext): void {
-    const branch = ctx.sessionManager.getBranch();
-    let lastState: Record<string, unknown> | undefined;
-    let toolResults = 0;
+/** Thrown by `restore` and `fromJSON` when saved state cannot be read; the log is left unchanged. */
+export class InvalidQuestLogStateError extends Error {
+  override name = "InvalidQuestLogStateError";
+}
 
-    for (const entry of branch) {
-      if (
-        entry.type === "message" &&
-        "message" in entry &&
-        entry.message.role === "toolResult" &&
-        entry.message.toolName === "quest"
-      ) {
-        toolResults++;
-        lastState = entry.message.details;
-      }
-    }
+function invalidState(reason: string): InvalidQuestLogStateError {
+  return new InvalidQuestLogStateError(`Invalid quest log state: ${reason}`);
+}
 
-    if (lastState) {
-      const quests = lastState.quests;
-      const questCount = Array.isArray(quests) ? quests.length : 0;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-      if (Array.isArray(quests)) {
-        this.quests = (quests as Quest[]).filter((q) => !("parentId" in q && q.parentId));
-        this.steps = (quests as Quest[]).filter((q) => "parentId" in q && q.parentId) as Step[];
-      } else {
-        this.quests = [];
-        this.steps = [];
-      }
-      this.usedIds = new Set([...this.quests, ...this.steps].map((q) => q.id));
-      logger.debug("quests:state", "reconstruct", { toolResults, questCount });
-    } else {
-      this.quests = [];
-      this.steps = [];
-      this.usedIds.clear();
-      logger.debug("quests:state", "reconstruct-empty", { toolResults });
-    }
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
 
-    this.history = [];
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || isString(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(isString);
+}
+
+function isIndex(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+// Snapshot entries may hold quests whose parentId changed after the snapshot, so either role is valid.
+function isQuestRecord(value: unknown): value is Quest | Step {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    isString(value.description) &&
+    typeof value.done === "boolean" &&
+    typeof value.createdAt === "number" &&
+    isOptionalString(value.parentId)
+  );
+}
+
+function isQuestRecordArray(value: unknown): value is (Quest | Step)[] {
+  return Array.isArray(value) && value.every(isQuestRecord);
+}
+
+function isOptionalQuestRecordArray(value: unknown): boolean {
+  return value === undefined || isQuestRecordArray(value);
+}
+
+function isHistoryEntry(value: unknown): value is HistoryEntry {
+  if (!isRecord(value)) return false;
+  switch (value.type) {
+    case QUEST_ACTIONS.add:
+      return isString(value.id) && isOptionalString(value.parentId);
+    case QUEST_ACTIONS.toggle:
+      return isStringArray(value.ids);
+    case QUEST_ACTIONS.update:
+      return isString(value.id) && isString(value.previousDescription);
+    case QUEST_ACTIONS.delete:
+      return (
+        isStringArray(value.ids) &&
+        isStringArray(value.deletedIds) &&
+        isQuestRecordArray(value.previousQuests) &&
+        isQuestRecordArray(value.previousSteps)
+      );
+    case QUEST_ACTIONS.clear:
+      return value.all === true
+        ? isQuestRecordArray(value.quests) && isOptionalQuestRecordArray(value.steps)
+        : value.all === false &&
+            isQuestRecordArray(value.previousQuests) &&
+            isOptionalQuestRecordArray(value.previousSteps);
+    case QUEST_ACTIONS.reorder:
+      return (
+        isQuestRecord(value.quest) &&
+        isIndex(value.oldIndex) &&
+        isStringArray(value.previousIds) &&
+        isString(value.targetId)
+      );
+    case QUEST_ACTIONS.reparent:
+      return (
+        isString(value.id) &&
+        isOptionalString(value.previousParentId) &&
+        (value.previousQuestIndex === undefined || isIndex(value.previousQuestIndex))
+      );
+    default:
+      return false;
   }
 }
 
-export function makeToolResult(
-  text: string,
-  questLog: QuestLog,
-  displayQuests?: Quest[],
-  snapshotQuests?: Quest[],
-): AgentToolResult<unknown> {
-  return {
-    content: [{ type: "text", text }],
-    details: {
-      quests: questLog.getAll(),
-      usedIds: questLog.getUsedIds(),
-      displayQuests,
-      snapshotQuests,
-    },
+function isRedoEntry(value: unknown): value is RedoEntry {
+  if (!isRecord(value)) return false;
+  switch (value.type) {
+    case QUEST_ACTIONS.add:
+      return isQuestRecord(value.quest);
+    case QUEST_ACTIONS.toggle:
+    case QUEST_ACTIONS.delete:
+      return isStringArray(value.ids);
+    case QUEST_ACTIONS.update:
+      return isString(value.id) && isString(value.description);
+    case QUEST_ACTIONS.clear:
+      return typeof value.all === "boolean";
+    case QUEST_ACTIONS.reorder:
+      return isString(value.id) && isString(value.targetId);
+    case QUEST_ACTIONS.reparent:
+      return isString(value.id) && isOptionalString(value.parentId);
+    default:
+      return false;
+  }
+}
+
+function checkEach(value: unknown, field: string, isValid: (item: unknown) => boolean): void {
+  if (!Array.isArray(value)) throw invalidState(`${field} must be an array`);
+  const index = value.findIndex((item) => !isValid(item));
+  if (index !== -1) throw invalidState(`${field}[${index}] is malformed`);
+}
+
+function decodeQuestLogState(input: unknown): QuestLogState {
+  let state: unknown;
+  try {
+    state = JSON.parse(JSON.stringify(input));
+  } catch {
+    throw invalidState("it is not JSON");
+  }
+  if (!isRecord(state)) throw invalidState("expected an object");
+  if (state.version !== QUEST_LOG_STATE_VERSION) {
+    throw invalidState(`unsupported version ${JSON.stringify(state.version)}`);
+  }
+  checkEach(state.quests, "quests", (quest) => isQuestRecord(quest) && !("parentId" in quest));
+  checkEach(
+    state.steps,
+    "steps",
+    (step) => isQuestRecord(step) && "parentId" in step && isString(step.parentId),
+  );
+  checkEach(state.usedIds, "usedIds", isString);
+  checkEach(state.history, "history", isHistoryEntry);
+  checkEach(state.redoStack, "redoStack", isRedoEntry);
+  const decoded = state as QuestLogState;
+  checkRelationships(decoded);
+  return decoded;
+}
+
+// A live id missing from usedIds could be handed out again, and a step without a parent quest
+// would drop out of getAll().
+function checkRelationships(state: QuestLogState): void {
+  const seen = new Set<string>();
+  for (const { id } of [...state.quests, ...state.steps]) {
+    if (seen.has(id)) throw invalidState(`quest [${id}] appears twice`);
+    seen.add(id);
+  }
+  const used = new Set(state.usedIds);
+  const unreserved = [...seen].find((id) => !used.has(id));
+  if (unreserved !== undefined) throw invalidState(`quest [${unreserved}] is missing from usedIds`);
+  const parents = new Set(state.quests.map(({ id }) => id));
+  const orphan = state.steps.find((step) => !parents.has(step.parentId));
+  if (orphan) throw invalidState(`step [${orphan.id}] has no parent quest [${orphan.parentId}]`);
+}
+
+/*
+ * In memory, history snapshots share quest objects with the live log, and reorder undo looks its
+ * quest up by identity. JSON copies those objects apart, so walk history from newest to oldest and
+ * point each reference at the object that was live right after that entry. Matching on the live
+ * set at each step, not on today's quests, keeps a deleted quest distinct from a later quest that
+ * reused its id.
+ */
+function relinkHistory(state: QuestLogState): void {
+  let live = new Map<string, Quest>([...state.quests, ...state.steps].map((q) => [q.id, q]));
+  const link = <T extends Quest>(quest: T): T => (live.get(quest.id) as T | undefined) ?? quest;
+  const relinkSnapshot = (quests: Quest[], steps: Step[] = []): [Quest[], Step[]] => {
+    const linkedQuests = quests.map(link);
+    const linkedSteps = steps.map(link);
+    live = new Map([...linkedQuests, ...linkedSteps].map((q) => [q.id, q]));
+    return [linkedQuests, linkedSteps];
   };
+
+  for (const entry of [...state.history].reverse()) {
+    switch (entry.type) {
+      case QUEST_ACTIONS.add:
+        live.delete(entry.id);
+        break;
+      case QUEST_ACTIONS.reorder:
+        entry.quest = link(entry.quest);
+        break;
+      case QUEST_ACTIONS.delete:
+        [entry.previousQuests, entry.previousSteps] = relinkSnapshot(
+          entry.previousQuests,
+          entry.previousSteps,
+        );
+        break;
+      case QUEST_ACTIONS.clear:
+        if (entry.all) {
+          [entry.quests, entry.steps] = relinkSnapshot(entry.quests, entry.steps);
+        } else {
+          [entry.previousQuests, entry.previousSteps] = relinkSnapshot(
+            entry.previousQuests,
+            entry.previousSteps,
+          );
+        }
+        break;
+    }
+  }
 }
