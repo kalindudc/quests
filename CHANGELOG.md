@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-18
+
 - feat: quests in bb threads for every provider, with per-thread state, a Quests tab and a progress chip in the prompt box that summarizes open quests on hover; plain pi and Herdr are unchanged
 - fix: the pi system prompt told agents that had quests that there were none, and gave an empty log only a weak nudge
 - fix: a pi session saved by pi-quests 0.1 to 0.3 starts with an empty quest log and a notice, instead of loading quests whose numeric ids no tool or command could address
