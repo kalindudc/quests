@@ -1,13 +1,13 @@
 # Architecture
 
-> See also: [Pattern](pattern.md) · [Reference](reference.md) · [Quests](quests.md)
+> See also: [Pattern](pattern.md) · [Reference](reference.md) · [Quests](quests.md) · [Quests in bb](bb.md)
 
 ## Overview
 
 pi-quests is a quest log for coding agents. Its engine in `src/` runs in two hosts:
 
 - The [pi](https://github.com/earendil-works/pi-mono/tree/main/packages/coding-agent) extension in `extensions/pi/` adds a session-scoped quest log with one LLM-callable tool (`quest`) and one command namespace (`/quests`), both operating on a shared in-memory `QuestLog` dataplane. It loads via `pi install npm:pi-quests` (or `pi -e ./extensions/pi/index.ts` for local development) and registers the tool, command, message renderer, session event hooks, and system prompt injection.
-- The bb plugin in `extensions/bb/`, described in [bb thread state](#bb-thread-state).
+- The bb plugin in `extensions/bb/`, described in [bb thread state](#bb-thread-state). It gives every bb thread the `quest` tool, whichever provider runs it; [Quests in bb](bb.md) is its user guide.
 
 ## Repository layout
 

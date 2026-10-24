@@ -4,7 +4,7 @@
 
 ## What is a quest?
 
-A **quest** is a lightweight task item with an ID, description, completion flag, and creation timestamp. The LLM and user can add, toggle, update, and delete quests throughout a session.
+A **quest** is a lightweight task item with an ID, description, completion flag, and creation timestamp. The agent and user can add, toggle, update, and delete quests throughout a pi session or bb thread.
 
 ## Quest state
 
@@ -54,3 +54,5 @@ Calling `redo` replays the most recently undone action. The redo stack is cleare
 Because tool results are stored in the session branch, `QuestLog` can reconstruct its entire state by scanning for the latest `quest` tool result. This happens automatically on `session_start` and `session_tree` events.
 
 Reconstruction requires no disk persistence and survives branch switches.
+
+In bb there is no session branch to scan, so the plugin keeps each thread's log in bb's thread metadata instead; see [Quests in bb](bb.md#where-quests-live).

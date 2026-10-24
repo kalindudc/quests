@@ -71,21 +71,21 @@ The `add_step` tool action is an alias for `split`.
 { "action": "reorder", "id": "0a", "targetId": "3f" }
 ```
 
-## Revert a mistake
+## Undo a mistake
 
 If a quest was accidentally toggled, updated, or deleted:
 
 ```bash
-/quests revert
+/quests undo
 ```
 
 Or via tool:
 
 ```json
-{ "action": "revert" }
+{ "action": "undo" }
 ```
 
-Only the most recent mutating action is reverted.
+Each undo reverts the most recent remaining change, so repeat it to go further back. `redo` replays the last undone change until a new change clears it. In bb, the Quests tab has Undo and Redo buttons for the same history.
 
 ## View the quest list interactively
 
@@ -98,6 +98,10 @@ Opens a paginated widget showing:
 - checked/unchecked quest rows
 - indented step rows
 - page navigation (`Tab` / `Shift+Tab`)
+
+## Edit an agent's quests in bb
+
+Open the thread's Quests tab, or click the progress chip in the prompt box, and change the log there. The agent's next `quest` call reports your changes; see [Quests in bb](bb.md#the-quests-tab).
 
 ## Recover quests after a branch switch
 

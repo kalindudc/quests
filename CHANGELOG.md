@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- docs: a guide to the bb plugin (`docs/bb.md`) with screenshots of the Quests tab and the progress chip; the README presents the quest log for both bb and pi, and the reference and patterns document `undo` and `redo` instead of the removed `revert`
+- docs: the quest-management skill, which bb gives every provider, no longer calls itself a pi extension and no longer says undo goes back only one step
+- chore: CI runs on Node 22, because the pi packages need Node 22.19 or later and the tests failed on Node 20
+
 ## [0.10.0] - 2026-10-18
 
 - feat: quests in bb threads for every provider, with per-thread state, a Quests tab and a progress chip in the prompt box that summarizes open quests on hover; plain pi and Herdr are unchanged

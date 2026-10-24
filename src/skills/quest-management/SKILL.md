@@ -1,11 +1,11 @@
 ---
 name: quest-management
-description: Quest management best practices for the pi-quests extension. Use when the user asks about tracking tasks, managing quests, using the quest tool, or when you need guidance on how to structure session work into quests and steps.
+description: Quest management best practices for the quest tool. Use when the user asks about tracking tasks, managing quests, using the quest tool, or when you need guidance on how to structure session work into quests and steps.
 ---
 
 # Quest Management
 
-This skill provides guidelines and best practices for using the quest management system in the pi-quests extension. It covers the core actions available for managing quests, recommended workflows for common use cases, and important rules to follow for effective task tracking and progress management.
+This skill provides guidelines and best practices for using the quest tool, in pi or in any bb thread. It covers the core actions available for managing quests, recommended workflows for common use cases, and important rules to follow for effective task tracking and progress management.
 
 ## Action Reference
 
@@ -20,7 +20,7 @@ This skill provides guidelines and best practices for using the quest management
 | `clear` | — | Remove completed quests. `all: true` removes everything. |
 | `reorder` | `id`, `targetId` | Move a top-level quest before `targetId`. Steps cannot be reordered. |
 | `reparent` | `id`, `parentId?` | Demote to step under `parentId`, or promote to top-level if `parentId` omitted. |
-| `undo` | — | Undo the most recent mutating action. One level only. |
+| `undo` | — | Undo the most recent mutating action. Repeat to go further back. |
 | `redo` | — | Redo the most recently undone action. |
 | `rules` / `skill` | — | Return this document. |
 
