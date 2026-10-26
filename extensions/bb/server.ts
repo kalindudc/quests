@@ -1,18 +1,18 @@
 import { type BbPluginApi, defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { QUEST_PROMPT_GATE, QUEST_PROMPT_REMINDER } from "../../src/prompts.js";
+import { QUEST_INSTRUCTIONS } from "../../src/prompts.js";
 import type { QuestAction } from "../../src/quest/dataplane.js";
 import { DEFAULT_CONFIG } from "../../src/quest/defaults.js";
 import { QUEST_ACTION_VALUES, QUEST_ACTIONS } from "../../src/quest/types.js";
+import { refuseNoteStartingTurn, steerer, watchRequests } from "./requests.js";
+import { RPC_TAGS, STEER_PROVIDERS } from "./shared.js";
 import { createQuestStore } from "./store.js";
 
 // bb loads src/skills/quest-management/SKILL.md as a plugin skill; the server reads no files.
 export const QUEST_SKILL_POINTER =
   "The complete quest guide is the quest-management skill. Read it for actions, workflows, and rules.";
 
-const QUEST_TOOL_INSTRUCTIONS = [...QUEST_PROMPT_GATE.split("\n"), ...QUEST_PROMPT_REMINDER]
-  .map((line) => `- ${line}`)
-  .join("\n");
+const QUEST_TOOL_INSTRUCTIONS = QUEST_INSTRUCTIONS.map((line) => `- ${line}`).join("\n");
 
 const ID_LENGTH = DEFAULT_CONFIG.ids.length;
 const questId = z.string().regex(new RegExp(`^[0-9a-f]{${ID_LENGTH}}$`));
@@ -109,6 +109,8 @@ const questView = z.object({
     total: z.number().int(),
     current: z.string().nullable(),
   }),
+  agentChangedAt: z.number().int().nullable(),
+  unseenChanges: z.number().int(),
 });
 
 const threadId = z.string().min(1);
@@ -117,10 +119,18 @@ export const rpcContract = defineRpcContract({
   getLog: {
     input: z.strictObject({ threadId }),
     output: questView,
+    ...RPC_TAGS.getLog,
   },
   mutate: {
     input: z.strictObject({ threadId, action: questMutation }),
     output: z.object({ message: z.string(), view: questView }),
+    ...RPC_TAGS.mutate,
+  },
+  /** Steers the user's unseen panel changes into the running turn; false when nothing was sent. */
+  tell: {
+    input: z.strictObject({ threadId }),
+    output: z.object({ sent: z.boolean() }),
+    ...RPC_TAGS.tell,
   },
 });
 
@@ -161,7 +171,16 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
   bb.rpc.register(rpcContract, {
     getLog: ({ threadId }) => store.getLog(threadId),
     mutate: ({ threadId, action }) => store.mutate(threadId, action),
+    tell: async ({ threadId }) => {
+      const thread = await bb.sdk.threads.get({ threadId });
+      if (thread.status !== "active" || !STEER_PROVIDERS.has(thread.providerId)) {
+        return { sent: false };
+      }
+      return { sent: await store.deliverNote(threadId, null, steerer(bb, threadId)) };
+    },
   });
+  watchRequests(bb, store);
+  bb.experimental_hooks.on("message.dispatch", refuseNoteStartingTurn);
 
   bb.agents.registerTool({
     name: "quest",

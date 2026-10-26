@@ -1,3 +1,6 @@
+import { nextQuest, questProgress } from "./progress.js";
+import { QUEST_ACTIONS, type Quest, type QuestActionType, type Step } from "./types.js";
+
 /**
  * Error message design guidelines
  *
@@ -38,6 +41,54 @@ export function formatAddResult(q: { id: string; description: string }): string 
 
 export function formatBatchAddResult(added: { id: string; description: string }[]): string {
   return `Added ${added.length} quests:\n${added.map((q) => `[${q.id}]: ${q.description}`).join("\n")}`;
+}
+
+export function formatSplitResult(
+  parentId: string,
+  steps: { id: string; description: string }[],
+): string {
+  const noun = steps.length === 1 ? "step" : "steps";
+  const lines = steps.map((step) => `[${step.id}]: ${step.description}`);
+  return [`Split quest [${parentId}] into ${steps.length} ${noun}:`, ...lines].join("\n");
+}
+
+/** What is done and what comes next, so a result shows the plan without a list call. */
+export function formatPlanStatus(quests: readonly (Quest | Step)[]): string {
+  const { done, total } = questProgress(quests);
+  if (total === 0) return "The quest log is empty.";
+  const next = nextQuest(quests);
+  if (next === null) return `${done} of ${total} done. Every quest is done.`;
+  const { quest, parent } = next;
+  let note = "";
+  if (parent !== null) note = ` (a step of [${parent.id}])`;
+  else if (quests.some((step) => "parentId" in step && step.parentId === quest.id)) {
+    note = " (all its steps are done; toggle it once the quest itself is complete)";
+  }
+  return `${done} of ${total} done. Next: [${quest.id}] ${clip(quest.description)}${note}`;
+}
+
+const STATUS_DESCRIPTION_LIMIT = 80;
+
+function clip(text: string): string {
+  return text.length > STATUS_DESCRIPTION_LIMIT
+    ? `${text.slice(0, STATUS_DESCRIPTION_LIMIT - 1)}…`
+    : text;
+}
+
+const PLAN_STATUS_SKIPPED: ReadonlySet<QuestActionType> = new Set([
+  QUEST_ACTIONS.list,
+  QUEST_ACTIONS.rules,
+  QUEST_ACTIONS.skill,
+]);
+
+/** The quest tool's text for the agent: a successful change also reports the plan status. */
+export function formatToolResult(
+  action: QuestActionType,
+  result: { success: boolean; message: string },
+  quests: readonly (Quest | Step)[],
+): string {
+  if (!result.success || PLAN_STATUS_SKIPPED.has(action)) return result.message;
+  return `${result.message}\n${formatPlanStatus(quests)}`;
 }
 
 export function formatToggleResult(id: string, done: boolean): string {

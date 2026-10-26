@@ -1,7 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
-import { QUEST_PROMPT_GATE } from "../../src/prompts.js";
+import { formatQuestNote } from "../../src/prompts.js";
 import { InvalidQuestLogStateError, QuestLog } from "../../src/quest/dataplane.js";
+import type { Quest } from "../../src/quest/types.js";
 import { shouldStepAside } from "./bb-bridge.js";
 import { createQuestsHandler, openQuestList } from "./commands/handler.js";
 import { DEFAULT_CONFIG, getConfig, type ResolvedConfig } from "./config.js";
@@ -23,11 +24,36 @@ import { QuestUsageTracker } from "./tracker.js";
  * - Snapshot relevant session state at each quest milestone.
  * - Provide rollback support to restore a previous snapshot.
  */
-const NO_QUESTS_REMINDER =
-  "No active quests. Use the learn_quests tool to understand how to use quests and use quests to track this task. DO THIS NOW and acknowledge it.";
-
 const UNREADABLE_QUESTS_NOTICE =
   "This session's quests were saved by an older pi-quests and could not be restored, so the quest log starts empty.";
+
+export const QUEST_NOTE_TYPE = "quest-note";
+
+/*
+ * A request is stale when quests are open and the log is unchanged since the previous request.
+ * The note goes out once per stale stretch: after it, only a change to the log rearms it.
+ */
+function createStalenessCheck() {
+  let previous: string | undefined;
+  let noted = false;
+  return {
+    reset(): void {
+      previous = undefined;
+      noted = false;
+    },
+    check(quests: readonly Quest[]): boolean {
+      const snapshot = JSON.stringify(
+        quests.map(({ id, description, done }) => [id, description, done]),
+      );
+      const unchanged = snapshot === previous;
+      previous = snapshot;
+      if (!unchanged) noted = false;
+      if (!unchanged || noted || !quests.some((quest) => !quest.done)) return false;
+      noted = true;
+      return true;
+    },
+  };
+}
 
 export default function (pi: ExtensionAPI): void {
   if (shouldStepAside("quest")) {
@@ -46,6 +72,7 @@ export default function (pi: ExtensionAPI): void {
     DEFAULT_CONFIG.display.showStatus,
   );
   let unreadableNoticeShown = false;
+  const staleness = createStalenessCheck();
 
   // pi-quests 0.1 to 0.3 saved numeric ids, which the engine rejects. Such a session starts with an
   // empty log rather than losing its quest tool and /quests command.
@@ -89,6 +116,7 @@ export default function (pi: ExtensionAPI): void {
     tracker = new QuestUsageTracker();
     statusWidget = new QuestStatusWidget(config.display.icon, config.display.showStatus);
     unreadableNoticeShown = false;
+    staleness.reset();
     restoreFromSession(ctx);
     if (questLog.getAll().length > 0) tracker.markQuestToolUsed();
     statusWidget.update(questLog, ctx.ui, ctx.ui.theme);
@@ -105,6 +133,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.on("session_tree", async (_event, ctx) => {
+    staleness.reset();
     restoreFromSession(ctx);
     if (questLog.getAll().length > 0) tracker.markQuestToolUsed();
     statusWidget.update(questLog, ctx.ui, ctx.ui.theme);
@@ -117,14 +146,17 @@ export default function (pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("before_agent_start", async (event) => {
-    if (questLog.getAll().length === 0)
-      return {
-        systemPrompt: `# Quest Management\n${QUEST_PROMPT_GATE}\n\n${event.systemPrompt}\n\n## Quest Management\n${NO_QUESTS_REMINDER}`,
-      };
-
+  // The tool's guidelines already carry the rules, so the system prompt stays byte-identical and
+  // cached; a stale log gets one note on the user's prompt instead of an extra model call.
+  pi.on("before_agent_start", async () => {
+    const quests = questLog.getAll();
+    if (!staleness.check(quests)) return undefined;
     return {
-      systemPrompt: `# Quest Management\n${QUEST_PROMPT_GATE}\n\n${event.systemPrompt}`,
+      message: {
+        customType: QUEST_NOTE_TYPE,
+        content: formatQuestNote(quests, { stale: true, userChanges: [] }),
+        display: false,
+      },
     };
   });
 

@@ -58,6 +58,19 @@
 
 In bb the tool returns the same text without `details`, because bb keeps the log in thread metadata; see [Quests in bb](bb.md).
 
+**Result text:**
+
+A successful change ends with one line for the plan, so the agent can carry on without a `list` call. A split lists the new step ids:
+
+```
+Split quest [3a] into 2 steps:
+[55]: Live data on bb's query cache
+[54]: Refusals and toasts
+0 of 3 done. Next: [55] Live data on bb's query cache (a step of [3a])
+```
+
+The line names the first open step of the first open quest, or the quest itself once its steps are done, and reads `Every quest is done.` when nothing is open. `list`, `rules`, `skill` and failed actions return their text unchanged.
+
 **Result view in pi:**
 
 Tool results follow pi's compact view. A collapsed tool row shows the first 10 lines followed by a `... (N more lines, ctrl+o to expand)` hint; expanding the row (`app.tools.expand`, `ctrl+o` by default) shows the full quest list or document. This applies to quest listings and to plain-text results such as `rules`/`skill`.

@@ -6,6 +6,16 @@
 
 A **quest** is a lightweight task item with an ID, description, completion flag, and creation timestamp. The agent and user can add, toggle, update, and delete quests throughout a pi session or bb thread.
 
+## What quests are for
+
+Quests are the agent's live plan, and they serve three readers:
+
+- **The agent:** working memory that survives long contexts, failed turns and steering, and a checklist before it calls the work done.
+- **You:** a live view of progress, and a way to steer the plan by editing it.
+- **Other tools:** bb plugins such as minions show each thread's progress from it.
+
+All three need a log that is current while the work happens, so the tool's results report what is left after every change, and an agent whose open quests went unchanged through a whole request gets one short note at the next one. The [quest-management skill](../src/skills/quest-management/SKILL.md) gives agents the full guidance.
+
 ## Quest state
 
 A quest is defined as:

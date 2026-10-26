@@ -24,6 +24,7 @@ import {
   formatReparentTargetDoneError,
   formatReparentTargetIsStepError,
   formatReparentTargetNotFoundError,
+  formatSplitResult,
   formatStepCannotHaveSteps,
   formatTargetIdRequiredError,
   formatToggleResult,
@@ -1115,10 +1116,7 @@ export class QuestLog {
         }
         try {
           const steps = this.split(action.id, action.descriptions);
-          return {
-            success: true,
-            message: `Split quest [${action.id}] into ${steps.length} steps`,
-          };
+          return { success: true, message: formatSplitResult(action.id, steps) };
         } catch (err) {
           return {
             success: false,

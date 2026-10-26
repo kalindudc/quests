@@ -1,8 +1,11 @@
 import type { BbPluginApi, JsonValue, PluginThreadEventPayloads } from "@get-bb/plugin-sdk";
+import { formatQuestNote, formatUserChanges } from "../../src/prompts.js";
 import { type QuestAction, QuestLog, type QuestLogState } from "../../src/quest/dataplane.js";
 import { DEFAULT_CONFIG } from "../../src/quest/defaults.js";
+import { formatToolResult } from "../../src/quest/formatters.js";
 import { type QuestProgress, questProgress } from "../../src/quest/progress.js";
 import { QUEST_ACTIONS, type Quest, type Step } from "../../src/quest/types.js";
+import { questTag } from "./shared.js";
 
 type ThreadResponse = PluginThreadEventPayloads["thread.created"]["thread"];
 type ForkOrigin = Pick<ThreadResponse, "originKind" | "originPluginId" | "sourceThreadId">;
@@ -10,8 +13,6 @@ type ForkOrigin = Pick<ThreadResponse, "originKind" | "originPluginId" | "source
 // A fixed namespace, not the plugin id, so other plugins can read progress and a package
 // rename keeps every thread's quests.
 export const QUESTS_METADATA_NAMESPACE = "quests";
-export const QUESTS_REALTIME_CHANNEL = "quests";
-export const USER_CHANGES_PREFIX = "The user changed the quest log:";
 
 export const METADATA_LIMIT_BYTES = 256 * 1024;
 const PENDING_NOTE_LIMIT = 50;
@@ -22,9 +23,18 @@ const READ_ONLY_ACTIONS: ReadonlySet<QuestAction["type"]> = new Set([
   QUEST_ACTIONS.skill,
 ]);
 
-export type QuestView = { quests: (Quest | Step)[]; progress: QuestProgress };
+export type QuestView = {
+  quests: (Quest | Step)[];
+  progress: QuestProgress;
+  /** When the agent last changed the log; null until it does. */
+  agentChangedAt: number | null;
+  /** Panel changes the agent has not seen yet. */
+  unseenChanges: number;
+};
 export type QuestMutation = Exclude<QuestAction, { type: "list" | "rules" | "skill" }>;
-export type QuestsMetadata = {
+/** `notedAt` is when the agent last got a note that its log had gone stale. */
+export type QuestTimes = { agentChangedAt: number | null; notedAt: number | null };
+export type QuestsMetadata = QuestTimes & {
   progress: QuestProgress;
   log: QuestLogState;
   pendingUserChanges: string[];
@@ -35,15 +45,35 @@ export interface QuestStore {
   runTool(threadId: string, action: QuestAction): Promise<{ text: string; isError: boolean }>;
   mutate(threadId: string, action: QuestMutation): Promise<{ message: string; view: QuestView }>;
   copyFork(thread: ThreadResponse): Promise<void>;
+  /**
+   * Hands `send` the note for a new request, then records it: the user's unseen changes, and the
+   * log's state when it has not changed since `previousRequestAt`. Sends nothing when neither
+   * applies, and records nothing when `send` throws.
+   */
+  deliverNote(
+    threadId: string,
+    previousRequestAt: number | null,
+    send: (text: string) => Promise<void>,
+  ): Promise<boolean>;
 }
 
-type LoadedQuests = { log: QuestLog; saved: QuestLogState; pendingUserChanges: string[] };
+type LoadedQuests = QuestTimes & {
+  log: QuestLog;
+  saved: QuestLogState;
+  pendingUserChanges: string[];
+};
+
+const NO_TIMES: QuestTimes = { agentChangedAt: null, notedAt: null };
 
 export function createQuestStore(bb: BbPluginApi, skillDocument: string): QuestStore {
   const withThreadLock = createThreadLocks();
-  const loaded = (state: unknown, pendingUserChanges: string[]): LoadedQuests => {
+  const loaded = (
+    state: unknown,
+    pendingUserChanges: string[],
+    times: QuestTimes,
+  ): LoadedQuests => {
     const log = QuestLog.fromJSON(state, DEFAULT_CONFIG, { skillDocument });
-    return { log, saved: log.toJSON(), pendingUserChanges };
+    return { log, saved: log.toJSON(), pendingUserChanges, ...times };
   };
 
   async function read(threadId: string): Promise<LoadedQuests | null> {
@@ -51,14 +81,19 @@ export function createQuestStore(bb: BbPluginApi, skillDocument: string): QuestS
       threadId,
       pluginId: QUESTS_METADATA_NAMESPACE,
     });
-    const { log, pendingUserChanges, progress } = metadata;
+    const { log, pendingUserChanges, progress, agentChangedAt, notedAt } = metadata;
     if (log === undefined && pendingUserChanges === undefined && progress === undefined) {
       return null;
     }
     try {
       if (!isProgress(progress)) throw new Error("progress is malformed");
       if (!isStringArray(pendingUserChanges)) throw new Error("pendingUserChanges is malformed");
-      return loaded(log, pendingUserChanges);
+      if (!isOptionalTime(agentChangedAt)) throw new Error("agentChangedAt is malformed");
+      if (!isOptionalTime(notedAt)) throw new Error("notedAt is malformed");
+      return loaded(log, pendingUserChanges, {
+        agentChangedAt: agentChangedAt ?? null,
+        notedAt: notedAt ?? null,
+      });
     } catch (error) {
       throw new Error(
         `Saved quests for thread ${threadId} are invalid and were left unchanged: ${messageOf(error)}`,
@@ -70,14 +105,15 @@ export function createQuestStore(bb: BbPluginApi, skillDocument: string): QuestS
     threadId: string,
     log: QuestLogState,
     pendingUserChanges: readonly string[],
+    times: QuestTimes,
   ): Promise<void> {
-    const metadata = fitQuestsMetadata(log, pendingUserChanges);
+    const metadata = fitQuestsMetadata(log, pendingUserChanges, times);
     await bb.sdk.threads.updatePluginMetadata({
       threadId,
       pluginId: QUESTS_METADATA_NAMESPACE,
       set: JSON.parse(JSON.stringify(metadata)) as Record<string, JsonValue>,
     });
-    bb.realtime.publish(QUESTS_REALTIME_CHANNEL, { threadId });
+    bb.rpc.experimental_invalidate([questTag(threadId)]);
   }
 
   /*
@@ -90,43 +126,65 @@ export function createQuestStore(bb: BbPluginApi, skillDocument: string): QuestS
     if (stored) return stored;
     const target = thread ?? (await bb.sdk.threads.get({ threadId }));
     const empty = new QuestLog().toJSON();
-    if (!isCopyableFork(target)) return loaded(empty, []);
+    if (!isCopyableFork(target)) return loaded(empty, [], NO_TIMES);
     const source = await read(target.sourceThreadId);
     const copy = source?.saved ?? empty;
-    await write(threadId, copy, []);
-    return loaded(copy, []);
+    const times = { agentChangedAt: source?.agentChangedAt ?? null, notedAt: null };
+    await write(threadId, copy, [], times);
+    return loaded(copy, [], times);
   }
 
   return {
-    getLog: (threadId) => withThreadLock(threadId, async () => viewOf((await load(threadId)).log)),
+    getLog: (threadId) => withThreadLock(threadId, async () => viewOf(await load(threadId))),
 
     runTool: (threadId, action) =>
       withThreadLock(threadId, async () => {
-        const { log, saved, pendingUserChanges } = await load(threadId);
+        const { log, saved, pendingUserChanges, agentChangedAt, notedAt } = await load(threadId);
         const result = log.execute(action);
         const changed = result.success && !READ_ONLY_ACTIONS.has(action.type);
         if (changed || pendingUserChanges.length > 0) {
-          await write(threadId, changed ? log.toJSON() : saved, []);
+          await write(threadId, changed ? log.toJSON() : saved, [], {
+            agentChangedAt: changed ? Date.now() : agentChangedAt,
+            notedAt,
+          });
         }
         return {
-          text: withUserChanges(pendingUserChanges, result.message),
+          text: withUserChanges(
+            pendingUserChanges,
+            formatToolResult(action.type, result, log.getAll()),
+          ),
           isError: !result.success,
         };
       }),
 
     mutate: (threadId, action) =>
       withThreadLock(threadId, async () => {
-        const { log, pendingUserChanges } = await load(threadId);
-        const result = log.execute(action);
+        const current = await load(threadId);
+        const result = current.log.execute(action);
         if (!result.success) throw new Error(result.message);
-        await write(threadId, log.toJSON(), addUserChange(pendingUserChanges, result.message));
-        return { message: result.message, view: viewOf(log) };
+        const pendingUserChanges = addUserChange(current.pendingUserChanges, result.message);
+        await write(threadId, current.log.toJSON(), pendingUserChanges, timesOf(current));
+        return { message: result.message, view: viewOf({ ...current, pendingUserChanges }) };
       }),
 
     copyFork: async (thread) => {
       if (!isCopyableFork(thread)) return;
       await withThreadLock(thread.id, () => load(thread.id, thread));
     },
+
+    deliverNote: (threadId, previousRequestAt, send) =>
+      withThreadLock(threadId, async () => {
+        const current = await load(threadId);
+        const quests = current.log.getAll();
+        const stale = isStale(current, quests, previousRequestAt);
+        if (!stale && current.pendingUserChanges.length === 0) return false;
+        await send(formatQuestNote(quests, { stale, userChanges: current.pendingUserChanges }));
+        await write(threadId, current.saved, [], {
+          ...timesOf(current),
+          notedAt: stale ? Date.now() : current.notedAt,
+        });
+        return true;
+      }),
   };
 }
 
@@ -138,7 +196,9 @@ export function createQuestStore(bb: BbPluginApi, skillDocument: string): QuestS
 export function fitQuestsMetadata(
   log: QuestLogState,
   pendingUserChanges: readonly string[],
+  { agentChangedAt, notedAt }: QuestTimes = NO_TIMES,
 ): QuestsMetadata {
+  const times = { agentChangedAt, notedAt };
   const progress = progressOfState(log);
   const history = [...log.history];
   const redoStack = [...log.redoStack];
@@ -149,6 +209,7 @@ export function fitQuestsMetadata(
     progress,
     log: { ...log, history: [], redoStack: [] },
     pendingUserChanges: [],
+    ...times,
   });
   const bytes = () =>
     emptyBytes + entryBytes(historySizes) + entryBytes(redoSizes) + jsonBytes(pending) - 2;
@@ -170,7 +231,22 @@ export function fitQuestsMetadata(
       pending = joinUserChanges(notes.slice(1), earlier + 1);
     }
   }
-  return { progress, log: { ...log, history, redoStack }, pendingUserChanges: pending };
+  return { progress, log: { ...log, history, redoStack }, pendingUserChanges: pending, ...times };
+}
+
+/*
+ * Stale: quests are open and the agent has not changed them since the user's previous request,
+ * and no note has gone out since the agent's last change. A log the agent never changed has no
+ * baseline, so it is never stale.
+ */
+function isStale(
+  { agentChangedAt, notedAt }: QuestTimes,
+  quests: readonly (Quest | Step)[],
+  previousRequestAt: number | null,
+): boolean {
+  if (agentChangedAt === null || previousRequestAt === null) return false;
+  if (!quests.some((quest) => !quest.done)) return false;
+  return agentChangedAt < previousRequestAt && (notedAt === null || notedAt < agentChangedAt);
 }
 
 /** Appends a panel change for the agent, folding all but the newest 50 into a count line. */
@@ -207,14 +283,23 @@ function progressOfState(log: QuestLogState): QuestProgress {
   return questProgress([...log.quests, ...log.steps]);
 }
 
-function viewOf(log: QuestLog): QuestView {
-  return { quests: log.getAll(), progress: questProgress(log.getAll()) };
+function timesOf({ agentChangedAt, notedAt }: QuestTimes): QuestTimes {
+  return { agentChangedAt, notedAt };
+}
+
+function viewOf({ log, agentChangedAt, pendingUserChanges }: LoadedQuests): QuestView {
+  const quests = log.getAll();
+  const { notes, earlier } = splitUserChanges(pendingUserChanges);
+  return {
+    quests,
+    progress: questProgress(quests),
+    agentChangedAt,
+    unseenChanges: notes.length + earlier,
+  };
 }
 
 function withUserChanges(changes: string[], message: string): string {
-  if (changes.length === 0) return message;
-  const list = changes.map((change) => `- ${change.replaceAll("\n", "\n  ")}`).join("\n");
-  return `${USER_CHANGES_PREFIX}\n${list}\n\n${message}`;
+  return changes.length === 0 ? message : `${formatUserChanges(changes)}\n\n${message}`;
 }
 
 function isCopyableFork<T extends ForkOrigin>(thread: T): thread is T & { sourceThreadId: string } {
@@ -223,6 +308,10 @@ function isCopyableFork<T extends ForkOrigin>(thread: T): thread is T & { source
     thread.originPluginId !== "side-chat" &&
     thread.sourceThreadId !== null
   );
+}
+
+function isOptionalTime(value: unknown): value is number | null | undefined {
+  return value === undefined || value === null || (Number.isInteger(value) && Number(value) >= 0);
 }
 
 function isStringArray(value: unknown): value is string[] {

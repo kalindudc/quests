@@ -101,7 +101,7 @@ Opens a paginated widget showing:
 
 ## Edit an agent's quests in bb
 
-Open the thread's Quests tab, or click the progress chip in the prompt box, and change the log there. The agent's next `quest` call reports your changes; see [Quests in bb](bb.md#the-quests-tab).
+Expand the quests segment above the composer, or open the thread's Quests tab, and change the log there. To turn a draft into a quest, choose **Add as a quest** in the menu next to send. The agent hears about your changes with your next message or its next `quest` call, and **Tell it now** sends them into a running turn; see [Quests in bb](bb.md#the-quests-tab).
 
 ## Recover quests after a branch switch
 

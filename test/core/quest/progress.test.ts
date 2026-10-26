@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { QuestLog } from "../../../src/quest/dataplane.js";
-import { questProgress } from "../../../src/quest/progress.js";
+import { nextQuest, questProgress } from "../../../src/quest/progress.js";
 
 describe("questProgress", () => {
   it("is empty for an empty log", () => {
@@ -27,5 +27,31 @@ describe("questProgress", () => {
     log.add("Later");
 
     expect(questProgress(log.getAll())).toEqual({ done: 1, total: 3, current: "Later" });
+  });
+});
+
+describe("nextQuest", () => {
+  it("is null when nothing is open", () => {
+    const log = new QuestLog();
+    log.toggle(log.add("Done").id);
+    expect(nextQuest(log.getAll())).toBeNull();
+  });
+
+  it("is the first open step of the first open quest", () => {
+    const log = new QuestLog();
+    const parent = log.add("Parent");
+    const [first, second] = log.split(parent.id, ["First", "Second"]);
+    log.toggle(first!.id);
+
+    expect(nextQuest(log.getAll())).toEqual({ quest: second, parent });
+  });
+
+  it("is the quest itself once its steps are done", () => {
+    const log = new QuestLog();
+    const parent = log.add("Parent");
+    const [only] = log.split(parent.id, ["Only"]);
+    log.toggle(only!.id);
+
+    expect(nextQuest(log.getAll())).toEqual({ quest: parent, parent: null });
   });
 });

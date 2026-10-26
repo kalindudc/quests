@@ -1,6 +1,6 @@
 # AGENTS
 
-pi-quests shares a pi-free quest engine between its pi extension and bb plugin. Plain pi keeps its `quest` tool and `/quests` command; bb offers a thread panel, a progress chip and a provider-independent quest tool.
+pi-quests shares a pi-free quest engine between its pi extension and bb plugin. Plain pi keeps its `quest` tool and `/quests` command; bb offers a provider-independent quest tool, a segment above the composer, a Quests tab and an Info row.
 
 ## Layout
 
@@ -25,7 +25,7 @@ The two extensions never import each other, types included. Never add `extension
 | `src/quest/dataplane.ts` | `QuestLog` — state, history, `execute()`, revert, JSON state |
 | `src/quest/defaults.ts` | Pure `ResolvedConfig` and `DEFAULT_CONFIG` |
 | `src/quest/progress.ts` | `questProgress`, the done and total counts pi's footer and bb share |
-| `src/prompts.ts` | Quest prompt gate and reminders shared by both extensions |
+| `src/prompts.ts` | Quest instructions and the stale-log note shared by both extensions |
 | `src/skills/quest-management/SKILL.md` | The quest skill document |
 | `extensions/pi/index.ts` | pi entry point — registers tools, commands, renderers, session hooks |
 | `extensions/pi/session.ts` | pi session reconstruction and tool-result shape |
@@ -40,8 +40,12 @@ The two extensions never import each other, types included. Never add `extension
 | `extensions/pi/renderers/*.ts` | TUI renderers for tools, commands, and changelogs |
 | `extensions/pi/logger.ts` | Namespaced debug logging |
 | `extensions/bb/server.ts` | bb backend — the `quest` tool, RPC contract and fork handler |
-| `extensions/bb/store.ts` | Per-thread quest state in bb thread metadata |
-| `extensions/bb/app.tsx` | bb Quests tab and progress chip |
+| `extensions/bb/store.ts` | Per-thread quest state in bb thread metadata, and note delivery |
+| `extensions/bb/requests.ts` | Sends the note when a person's request starts a turn |
+| `extensions/bb/shared.ts` | Query tags and constants the server and page share; imports nothing |
+| `extensions/bb/app.tsx` | bb slot registrations |
+| `extensions/bb/ui/*.tsx` | bb page: query hooks, context segment, Quests tab, Info row, Add as a quest popup |
+| `scripts/quest-audit.mjs` | Measures how well agents keep their quest logs current ([docs/audit.md](docs/audit.md)) |
 
 ## Development
 

@@ -888,6 +888,20 @@ describe("Step", () => {
     expect(log.getSteps(parent.id)).toHaveLength(1);
   });
 
+  it("execute split names each new step so the agent can toggle it without a list", () => {
+    const log = new QuestLog();
+    const parent = log.add("Parent");
+    const result = log.execute({
+      type: QUEST_ACTIONS.split,
+      id: parent.id,
+      descriptions: ["First", "Second"],
+    });
+    const [first, second] = log.getSteps(parent.id);
+    expect(result.message).toBe(
+      `Split quest [${parent.id}] into 2 steps:\n[${first!.id}]: First\n[${second!.id}]: Second`,
+    );
+  });
+
   it("execute split returns not found for invalid id", () => {
     const log = new QuestLog();
     const result = log.execute({

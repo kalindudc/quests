@@ -15,14 +15,29 @@ import {
   formatNothingToUndoError,
   formatParentDoneError,
   formatParentNotFoundError,
+  formatPlanStatus,
   formatQuestList,
   formatReorderNotFoundError,
+  formatSplitResult,
   formatStepCannotHaveSteps,
   formatTargetIdRequiredError,
   formatToggleResult,
+  formatToolResult,
   formatUnknownActionError,
   formatUpdateResult,
 } from "../../../src/quest/formatters.js";
+import type { Quest, Step } from "../../../src/quest/types.js";
+
+const quest = (id: string, description: string, done = false): Quest => ({
+  id,
+  description,
+  done,
+  createdAt: 0,
+});
+const step = (id: string, parentId: string, description: string, done = false): Step => ({
+  ...quest(id, description, done),
+  parentId,
+});
 
 describe("formatQuestList", () => {
   it("renders quests with positional numbers and hex ids", () => {
@@ -189,5 +204,75 @@ describe("formatNothingToUndoError", () => {
 describe("formatNothingToRedoError", () => {
   it("includes recovery hint", () => {
     expect(formatNothingToRedoError()).toContain("Nothing to redo");
+  });
+});
+
+describe("formatSplitResult", () => {
+  it("lists every new step with its id", () => {
+    expect(
+      formatSplitResult("0a", [
+        { id: "10", description: "A" },
+        { id: "11", description: "B" },
+      ]),
+    ).toBe("Split quest [0a] into 2 steps:\n[10]: A\n[11]: B");
+  });
+
+  it("uses the singular for one step", () => {
+    expect(formatSplitResult("0a", [{ id: "10", description: "A" }])).toBe(
+      "Split quest [0a] into 1 step:\n[10]: A",
+    );
+  });
+});
+
+describe("formatPlanStatus", () => {
+  it("says when the log is empty", () => {
+    expect(formatPlanStatus([])).toBe("The quest log is empty.");
+  });
+
+  it("names the first open step of the first open quest", () => {
+    const quests = [
+      quest("01", "Done", true),
+      quest("02", "Build"),
+      step("03", "02", "Server", true),
+      step("04", "02", "Page"),
+      quest("05", "Verify"),
+    ];
+    expect(formatPlanStatus(quests)).toBe("2 of 5 done. Next: [04] Page (a step of [02])");
+  });
+
+  it("asks for the parent once its steps are all done", () => {
+    const quests = [quest("02", "Build"), step("03", "02", "Server", true)];
+    expect(formatPlanStatus(quests)).toBe(
+      "1 of 2 done. Next: [02] Build (all its steps are done; toggle it once the quest itself is complete)",
+    );
+  });
+
+  it("names a plain open quest without a note", () => {
+    expect(formatPlanStatus([quest("01", "Ship")])).toBe("0 of 1 done. Next: [01] Ship");
+  });
+
+  it("says when every quest is done", () => {
+    expect(formatPlanStatus([quest("01", "Ship", true)])).toBe("1 of 1 done. Every quest is done.");
+  });
+
+  it("shortens a long next description", () => {
+    const status = formatPlanStatus([quest("01", "x".repeat(200))]);
+    expect(status).toBe(`0 of 1 done. Next: [01] ${"x".repeat(79)}…`);
+  });
+});
+
+describe("formatToolResult", () => {
+  const quests = [quest("01", "Ship")];
+
+  it("adds the plan status to a successful change", () => {
+    expect(formatToolResult("toggle", { success: true, message: "Quest [02] done" }, quests)).toBe(
+      "Quest [02] done\n0 of 1 done. Next: [01] Ship",
+    );
+  });
+
+  it("leaves failures, lists and the skill document alone", () => {
+    expect(formatToolResult("toggle", { success: false, message: "nope" }, quests)).toBe("nope");
+    expect(formatToolResult("list", { success: true, message: "#1" }, quests)).toBe("#1");
+    expect(formatToolResult("skill", { success: true, message: "doc" }, quests)).toBe("doc");
   });
 });

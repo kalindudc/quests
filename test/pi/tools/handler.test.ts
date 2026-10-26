@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CONFIG } from "../../../extensions/pi/config.js";
 import { getQuestSkillDocument } from "../../../extensions/pi/skill.js";
 import { questToolExecute, registerQuestTool } from "../../../extensions/pi/tools/handler.js";
+import { QUEST_INSTRUCTIONS } from "../../../src/prompts.js";
 import { QuestLog } from "../../../src/quest/dataplane.js";
 import { QUEST_ACTIONS } from "../../../src/quest/types.js";
 
@@ -46,7 +47,7 @@ describe("questToolExecute", () => {
       id: "01",
       descriptions: ["Sub"],
     });
-    expect(getText(result.content[0]!)).toContain("Split quest [01] into 1 steps");
+    expect(getText(result.content[0]!)).toContain("Split quest [01] into 1 step:\n[02]: ");
     const details = result.details as { quests: unknown[] };
     expect(details.quests).toHaveLength(2);
   });
@@ -59,7 +60,7 @@ describe("questToolExecute", () => {
       id: "01",
       descriptions: ["Sub"],
     });
-    expect(getText(result.content[0]!)).toContain("Split quest [01] into 1 steps");
+    expect(getText(result.content[0]!)).toContain("Split quest [01] into 1 step:\n[02]: ");
     const details = result.details as { quests: unknown[] };
     expect(details.quests).toHaveLength(2);
   });
@@ -344,9 +345,7 @@ describe("registerQuestTool", () => {
       expect.objectContaining({
         name: "quest",
         promptSnippet: expect.any(String),
-        promptGuidelines: expect.arrayContaining([
-          expect.stringContaining("Before reading files, running commands, or making edits"),
-        ]),
+        promptGuidelines: [...QUEST_INSTRUCTIONS],
       }),
     );
   });

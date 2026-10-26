@@ -4,8 +4,8 @@ import {
   createQuestStore,
   fitQuestsMetadata,
   METADATA_LIMIT_BYTES,
-  USER_CHANGES_PREFIX,
 } from "../../extensions/bb/store.js";
+import { USER_CHANGES_PREFIX } from "../../src/prompts.js";
 import type { HistoryEntry, QuestLogState, RedoEntry } from "../../src/quest/dataplane.js";
 import { QUEST_ACTIONS } from "../../src/quest/types.js";
 
@@ -92,16 +92,21 @@ describe("quest store", () => {
     expect(await store.getLog("t1")).toEqual({
       quests: [],
       progress: { done: 0, total: 0, current: null },
+      agentChangedAt: null,
+      unseenChanges: 0,
     });
     expect(updates("t1")).toHaveLength(0);
   });
 
-  it("saves all three keys in one update under the quests namespace, then publishes", async () => {
+  it("saves every key in one update under the quests namespace, then refreshes reads", async () => {
     const { store, harness, updates } = createHost();
 
     const result = await store.runTool("t1", { type: QUEST_ACTIONS.add, descriptions: ["First"] });
 
-    expect(result).toEqual({ text: "Added quest [01]: First", isError: false });
+    expect(result).toEqual({
+      text: "Added quest [01]: First\n0 of 1 done. Next: [01] First",
+      isError: false,
+    });
     expect(updates("t1")).toEqual([
       [
         {
@@ -111,13 +116,13 @@ describe("quest store", () => {
             progress: { done: 0, total: 1, current: "First" },
             log: expect.objectContaining({ version: 1, usedIds: ["01"] }),
             pendingUserChanges: [],
+            agentChangedAt: expect.any(Number),
+            notedAt: null,
           },
         },
       ],
     ]);
-    expect(harness.inspection.realtimeSignals).toEqual([
-      { channel: "quests", payload: { threadId: "t1" } },
-    ]);
+    expect(harness.inspection.experimental_rpcInvalidations).toEqual([["quests:t1"]]);
   });
 
   it("restores quests, steps, undo and redo after a restart", async () => {
@@ -218,7 +223,7 @@ describe("quest store", () => {
   it("clears pending notices on a failed action without saving the action", async () => {
     const { store, saved, harness } = createHost();
     await store.mutate("t1", { type: QUEST_ACTIONS.add, descriptions: ["Panel quest"] });
-    const signals = harness.inspection.realtimeSignals.length;
+    const invalidations = harness.inspection.experimental_rpcInvalidations.length;
     const logBefore = saved("t1")?.log;
 
     const result = await store.runTool("t1", { type: QUEST_ACTIONS.delete, id: "ff" });
@@ -229,7 +234,7 @@ describe("quest store", () => {
     ).toBe(true);
     expect(saved("t1")?.pendingUserChanges).toEqual([]);
     expect(saved("t1")?.log).toEqual(logBefore);
-    expect(harness.inspection.realtimeSignals).toHaveLength(signals + 1);
+    expect(harness.inspection.experimental_rpcInvalidations).toHaveLength(invalidations + 1);
   });
 
   it("does not write for a read-only action with nothing pending", async () => {
@@ -296,7 +301,12 @@ describe("quest store", () => {
 
     const cleared = await store.runTool("t1", { type: QUEST_ACTIONS.clear });
 
-    expect(cleared).toEqual({ text: "Cleared 1 completed quests", isError: false });
+    expect(cleared).toEqual({
+      text: expect.stringMatching(
+        /^Cleared 1 completed quests\n0 of 1 done\. Next: \[01\] b{79}…$/,
+      ),
+      isError: false,
+    });
     expect(Buffer.byteLength(JSON.stringify(saved("t1")))).toBeLessThanOrEqual(
       METADATA_LIMIT_BYTES,
     );
@@ -455,5 +465,101 @@ describe("quest store forks", () => {
     await store.runTool("source", { type: QUEST_ACTIONS.add, descriptions: ["After the fork"] });
 
     expect(await descriptions(store, "fork")).toEqual([]);
+  });
+});
+
+describe("quest store notes", () => {
+  const sent: string[] = [];
+  const send = async (text: string) => {
+    sent.push(text);
+  };
+  beforeEach(() => {
+    sent.length = 0;
+    vi.useFakeTimers({ toFake: ["Date"], now: 1_000 });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("records when the agent last changed the log, and not for panel or read-only calls", async () => {
+    const { store } = createHost();
+    await store.runTool("t1", { type: QUEST_ACTIONS.add, descriptions: ["Agent"] });
+    vi.setSystemTime(5_000);
+    await store.mutate("t1", { type: QUEST_ACTIONS.add, descriptions: ["Panel"] });
+    await store.runTool("t1", { type: QUEST_ACTIONS.list });
+
+    expect(await store.getLog("t1")).toMatchObject({ agentChangedAt: 1_000, unseenChanges: 0 });
+  });
+
+  it("counts the panel changes the agent has not seen, folded ones included", async () => {
+    const { store } = createHost();
+    for (let index = 0; index < 52; index++) {
+      await store.mutate("t1", { type: QUEST_ACTIONS.add, descriptions: [`Q${index}`] });
+    }
+
+    expect((await store.getLog("t1")).unseenChanges).toBe(52);
+  });
+
+  it("sends a stale log's note once, until the agent changes the log again", async () => {
+    const { store, saved } = createHost();
+    await store.runTool("t1", { type: QUEST_ACTIONS.add, descriptions: ["Open"] });
+
+    expect(await store.deliverNote("t1", 500, send)).toBe(false);
+    vi.setSystemTime(9_000);
+    expect(await store.deliverNote("t1", 2_000, send)).toBe(true);
+    expect(sent).toEqual([expect.stringContaining("You have not updated the quests")]);
+    expect(saved("t1")?.notedAt).toBe(9_000);
+    expect(await store.deliverNote("t1", 8_000, send)).toBe(false);
+
+    vi.setSystemTime(10_000);
+    await store.runTool("t1", { type: QUEST_ACTIONS.add, descriptions: ["More"] });
+    expect(await store.deliverNote("t1", 20_000, send)).toBe(true);
+    expect(sent).toHaveLength(2);
+  });
+
+  it("never calls a finished log or one the agent never touched stale", async () => {
+    const { store } = createHost();
+    await store.mutate("t1", { type: QUEST_ACTIONS.add, descriptions: ["From the panel"] });
+    await store.runTool("t1", { type: QUEST_ACTIONS.list });
+    await store.runTool("t2", { type: QUEST_ACTIONS.add, descriptions: ["Done"] });
+    await store.runTool("t2", { type: QUEST_ACTIONS.toggle, id: "02" });
+
+    expect(await store.deliverNote("t1", 5_000, send)).toBe(false);
+    expect(await store.deliverNote("t2", 5_000, send)).toBe(false);
+    expect(sent).toEqual([]);
+  });
+
+  it("delivers unseen panel changes once, without calling the log stale", async () => {
+    const { store, saved } = createHost();
+    await store.runTool("t1", { type: QUEST_ACTIONS.add, descriptions: ["Agent"] });
+    await store.mutate("t1", { type: QUEST_ACTIONS.toggle, id: "01" });
+
+    expect(await store.deliverNote("t1", null, send)).toBe(true);
+    expect(sent[0]).toContain(`${USER_CHANGES_PREFIX}\n- Quest [01] done`);
+    expect(sent[0]).not.toContain("have not updated");
+    expect(saved("t1")).toMatchObject({ pendingUserChanges: [], notedAt: null });
+    expect(await store.deliverNote("t1", null, send)).toBe(false);
+  });
+
+  it("keeps the changes and records nothing when sending fails", async () => {
+    const { store, saved } = createHost();
+    await store.mutate("t1", { type: QUEST_ACTIONS.add, descriptions: ["Panel"] });
+    const failing = async () => {
+      throw new Error("thread went idle");
+    };
+
+    await expect(store.deliverNote("t1", null, failing)).rejects.toThrow("thread went idle");
+    expect(saved("t1")?.pendingUserChanges).toEqual(["Added quest [01]: Panel"]);
+  });
+
+  it("reads metadata saved before the timestamps existed", async () => {
+    const { store, seed } = createHost();
+    seed("t1", {
+      progress: { done: 0, total: 0, current: null },
+      log: { version: 1, quests: [], steps: [], usedIds: [], history: [], redoStack: [] },
+      pendingUserChanges: [],
+    });
+
+    expect(await store.getLog("t1")).toMatchObject({ agentChangedAt: null, unseenChanges: 0 });
   });
 });

@@ -1,8 +1,7 @@
 import { createFakePluginHost, makeThreadResponse } from "@get-bb/plugin-sdk/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import plugin, { QUEST_SKILL_POINTER } from "../../extensions/bb/server.js";
-import { USER_CHANGES_PREFIX } from "../../extensions/bb/store.js";
-import { QUEST_PROMPT_REMINDER } from "../../src/prompts.js";
+import { QUEST_INSTRUCTIONS, USER_CHANGES_PREFIX } from "../../src/prompts.js";
 import { QUEST_ACTION_VALUES } from "../../src/quest/types.js";
 
 type ThreadResponse = ReturnType<typeof makeThreadResponse>;
@@ -72,13 +71,13 @@ afterEach(async () => {
 });
 
 describe("quests bb plugin registration", () => {
-  it("registers one quest tool, the two RPC methods and no configure callback", async () => {
+  it("registers one quest tool, the three RPC methods and no configure callback", async () => {
     host = await loadPlugin();
     const { registrations } = host.harness.inspection;
 
     expect(registrations.agentTools.map((tool) => tool.name)).toEqual(["quest"]);
     expect(registrations.agentConfigurationProvider).toBeNull();
-    expect([...registrations.rpcMethods].sort()).toEqual(["getLog", "mutate"]);
+    expect([...registrations.rpcMethods].sort()).toEqual(["getLog", "mutate", "tell"]);
     expect(registrations.threadEventHandlers["thread.created"]).toBe(1);
   });
 
@@ -86,9 +85,8 @@ describe("quests bb plugin registration", () => {
     host = await loadPlugin();
     const [tool] = host.harness.inspection.registrations.agentTools;
 
-    expect(tool?.instructions).toContain("ALWAYS ensure the current work is tracked");
-    for (const reminder of QUEST_PROMPT_REMINDER) expect(tool?.instructions).toContain(reminder);
-    expect(tool?.instructions?.length).toBeLessThan(4096);
+    expect(tool?.instructions).toBe(QUEST_INSTRUCTIONS.map((line) => `- ${line}`).join("\n"));
+    expect(tool?.instructions?.length).toBeLessThan(1600);
   });
 
   it("advertises the same actions and id pattern as the pi tool", async () => {
@@ -165,13 +163,15 @@ describe("quests bb plugin tool and panel", () => {
     host = await loadPlugin();
 
     expect(await host.tool("t1", { action: "add", descriptions: ["From the agent"] })).toBe(
-      "Added quest [01]: From the agent",
+      "Added quest [01]: From the agent\n0 of 1 done. Next: [01] From the agent",
     );
     expect(await host.rpc("getLog", { threadId: "t1" })).toEqual({
       quests: [
         { id: "01", description: "From the agent", done: false, createdAt: expect.any(Number) },
       ],
       progress: { done: 0, total: 1, current: "From the agent" },
+      agentChangedAt: expect.any(Number),
+      unseenChanges: 0,
     });
 
     const change = await host.rpc("mutate", {
@@ -239,7 +239,7 @@ describe("quests bb plugin tool and panel", () => {
     });
   });
 
-  it("saves under the quests namespace and signals the thread", async () => {
+  it("saves under the quests namespace and refreshes the thread's reads", async () => {
     host = await loadPlugin();
 
     await host.tool("t9", { action: "add", descriptions: ["Tracked"] });
@@ -248,9 +248,7 @@ describe("quests bb plugin tool and panel", () => {
       "quests",
     ]);
     expect(host.saved("t9")?.progress).toEqual({ done: 0, total: 1, current: "Tracked" });
-    expect(host.harness.inspection.realtimeSignals).toEqual([
-      { channel: "quests", payload: { threadId: "t9" } },
-    ]);
+    expect(host.harness.inspection.experimental_rpcInvalidations).toEqual([["quests:t9"]]);
   });
 
   it("answers skill and rules with a pointer to the quest-management skill", async () => {
@@ -289,6 +287,8 @@ describe("quests bb plugin forks", () => {
     expect(await host.rpc("getLog", { threadId: "side" })).toEqual({
       quests: [],
       progress: { done: 0, total: 0, current: null },
+      agentChangedAt: null,
+      unseenChanges: 0,
     });
   });
 

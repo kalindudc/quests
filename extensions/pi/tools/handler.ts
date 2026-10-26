@@ -1,7 +1,8 @@
 import type { AgentToolResult, ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
-import { QUEST_PROMPT_GATE, QUEST_PROMPT_REMINDER } from "../../../src/prompts.js";
+import { QUEST_INSTRUCTIONS } from "../../../src/prompts.js";
 import type { QuestAction, QuestLog } from "../../../src/quest/dataplane.js";
+import { formatToolResult } from "../../../src/quest/formatters.js";
 import { QUEST_ACTIONS, type QuestActionType } from "../../../src/quest/types.js";
 import type { ResolvedConfig } from "../config.js";
 import { logger } from "../logger.js";
@@ -106,7 +107,8 @@ function runTool(
     : (result.quests ?? (result.quest ? [result.quest] : []));
   const snapshotQuests = action.type === QUEST_ACTIONS.delete ? displayQuests : undefined;
 
-  return makeToolResult(result.message, questLog, displayQuests, snapshotQuests);
+  const text = formatToolResult(action.type, result, questLog.getAll());
+  return makeToolResult(text, questLog, displayQuests, snapshotQuests);
 }
 
 export async function questToolExecute(
@@ -139,7 +141,7 @@ export function registerQuestTool(
     promptSnippet:
       "Manage quests and steps, or retrieve quest rules and best practices via skill/rules. " +
       "Use this to track tasks, plans, and progress, alongside your work. ",
-    promptGuidelines: [QUEST_PROMPT_GATE, ...QUEST_PROMPT_REMINDER],
+    promptGuidelines: [...QUEST_INSTRUCTIONS],
     parameters: createQuestParams(config.ids.length),
     execute: (toolCallId, params, _signal, _onUpdate, _ctx) =>
       questToolExecute(questLog, toolCallId, params),
@@ -156,10 +158,7 @@ export function registerQuestTool(
     label: "Learn Quests",
     description: "Learn about the quest system and how to use it effectively.",
     promptSnippet: "Use this tool to learn about the quest system and how to use it effectively.",
-    promptGuidelines: [
-      "Use this tool when on a session to understand how and when to use quests.",
-      "ALWAYS run this tool when on a new session before starting any work.",
-    ],
+    promptGuidelines: ["Read this when you are unsure how or when to use quests."],
     parameters: Type.Object(
       {},
       { description: "No parameters required for learning about quests" },

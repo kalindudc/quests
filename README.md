@@ -34,12 +34,14 @@ Do not install it from npm: the npm package contains only the pi extension, so `
 Every bb thread then gets:
 
 - one `quest` tool, whichever provider runs the thread: pi, Claude Code, Codex, or an ACP agent such as Cursor or opencode;
+- a quests segment in bb's context row above the composer, beside changed files and pull requests: collapsed it shows the progress and the next item, expanded it lets you tick and add quests;
 - a **Quests** tab in the thread's side panel, where you can add, edit, reorder, tick off and delete quests and steps, and undo or redo changes;
-- a progress chip in the prompt box that lists the open quests on hover and opens the Quests tab when clicked.
+- a Quests row in the Info tab, an **Add as a quest** item in the send menu, and an **Open the Quests tab** command;
+- one short note to the agent at your next request when its quests have gone stale or it has not seen your edits.
+
+![The quests segment above the composer, expanded](docs/assets/bb_quests_segment_open.png)
 
 ![The Quests tab in a bb thread](docs/assets/bb_quests_tab.png)
-
-![The quest chip in bb's prompt box, showing the open quests on hover](docs/assets/bb_quests_chip.png)
 
 Each thread keeps its own quests across bb restarts, and a forked thread starts with a copy of its source's quests. See [Quests in bb](docs/bb.md) for the details.
 
@@ -49,7 +51,7 @@ Each thread keeps its own quests across bb restarts, and a forked thread starts 
 pi install npm:pi-quests
 ```
 
-The agent gets the `quest` tool, and you get the `/quests` command, a footer progress count, and an interactive quest list (`ctrl+shift+l`).
+The agent gets the `quest` tool, and you get the `/quests` command, a footer progress count, and an interactive quest list (`ctrl+shift+l`). When the agent leaves its open quests unchanged through a whole request, your next prompt carries one short note with the plan's state.
 
 ```
 /quests help
@@ -109,7 +111,8 @@ npm ci
 
 | Doc | Description |
 |-----|-------------|
-| [Quests in bb](docs/bb.md) | The bb plugin: the quest tool for every provider, the Quests tab and the progress chip |
+| [Quests in bb](docs/bb.md) | The bb plugin: the quest tool for every provider, the note, the segment above the composer and the Quests tab |
+| [Audit](docs/audit.md) | Measuring how well agents keep their quest logs current |
 | [Pattern](docs/pattern.md) | "How do I...?" recipes for common workflows |
 | [Quests](docs/quests.md) | What are quests? |
 | [Reference](docs/reference.md) | Complete tool and command schemas, types |

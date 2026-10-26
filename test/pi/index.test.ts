@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { QUEST_PROMPT_GATE } from "../../src/prompts.js";
+import { QUEST_NOTE_TYPE } from "../../extensions/pi/index.js";
+import { QUEST_INSTRUCTIONS } from "../../src/prompts.js";
 
 describe("extension entry point", () => {
   beforeEach(() => {
@@ -29,22 +30,10 @@ describe("extension entry point", () => {
     };
   }
 
-  it("injects Quest Management section into system prompt", async () => {
+  async function startSession(branch: unknown[] = []) {
     const pi = createMockPi();
     const { default: init } = await import("../../extensions/pi/index.js");
     init(pi as unknown as ExtensionAPI);
-    const branch = [
-      {
-        type: "message",
-        message: {
-          role: "toolResult",
-          toolName: "quest",
-          details: {
-            quests: [{ id: "01", description: "Test task", done: false, createdAt: 1 }],
-          },
-        },
-      },
-    ];
     await pi._handlers.session_start[0](
       {},
       {
@@ -56,73 +45,68 @@ describe("extension entry point", () => {
         },
       },
     );
-    const handler = pi._handlers.before_agent_start[0];
-    const result = await handler({ systemPrompt: "base" });
-    expect(result.systemPrompt).toBe(`# Quest Management\n${QUEST_PROMPT_GATE}\n\nbase`);
-    expect(result.systemPrompt).not.toContain("learn_quests");
-  });
-
-  it("omits the no-quests reminder on resume when reconstructed quests exist", async () => {
-    const pi = createMockPi();
-    const { default: init } = await import("../../extensions/pi/index.js");
-    init(pi as unknown as ExtensionAPI);
-    const branch = [
-      {
-        type: "message",
-        message: {
-          role: "toolResult",
-          toolName: "quest",
-          details: {
-            quests: [{ id: "01", description: "Test task", done: false, createdAt: 1 }],
-          },
-        },
-      },
-    ];
-    await pi._handlers.session_start[0](
-      {},
-      {
-        cwd: "/tmp",
-        sessionManager: { getBranch: vi.fn().mockReturnValue(branch) },
-        ui: {
-          setStatus: vi.fn(),
-          theme: { fg: vi.fn((_, t) => t), bold: vi.fn((t) => t), strikethrough: vi.fn((t) => t) },
-        },
-      },
-    );
-    const result = await pi._handlers.before_agent_start[0]({ systemPrompt: "base" });
-    expect(result.systemPrompt).toContain(QUEST_PROMPT_GATE);
-    expect(result.systemPrompt).not.toContain("learn_quests");
-  });
-
-  it("shows the no-quests gate only for an empty log", async () => {
-    const pi = createMockPi();
-    const { default: init } = await import("../../extensions/pi/index.js");
-    init(pi as unknown as ExtensionAPI);
-    await pi._handlers.session_start[0](
-      {},
-      {
-        cwd: "/tmp",
-        sessionManager: { getBranch: vi.fn().mockReturnValue([]) },
-        ui: {
-          setStatus: vi.fn(),
-          theme: { fg: vi.fn((_, t) => t), bold: vi.fn((t) => t), strikethrough: vi.fn((t) => t) },
-        },
-      },
-    );
-
-    const empty = await pi._handlers.before_agent_start[0]({ systemPrompt: "base" });
-    expect(empty.systemPrompt).toMatch(
-      /^# Quest Management\n[\s\S]*\n\nbase\n\n## Quest Management\n/,
-    );
-    expect(empty.systemPrompt).toContain(QUEST_PROMPT_GATE);
-    expect(empty.systemPrompt).toContain("Use the learn_quests tool");
-
     const questTool = pi.registerTool.mock.calls
       .map(([tool]) => tool)
       .find((tool) => tool.name === "quest");
+    const request = () =>
+      pi._handlers.before_agent_start[0]({ systemPrompt: "base", prompt: "go" });
+    return { pi, questTool, request };
+  }
+
+  it("never rewrites the system prompt, so pi's prompt cache holds", async () => {
+    const { questTool, request } = await startSession();
+
+    expect(await request()).toBeUndefined();
     await questTool.execute("tc1", { action: "add", descriptions: ["Track me"] });
-    const tracked = await pi._handlers.before_agent_start[0]({ systemPrompt: "base" });
-    expect(tracked.systemPrompt).toBe(`# Quest Management\n${QUEST_PROMPT_GATE}\n\nbase`);
+    const result = await request();
+    expect(result?.systemPrompt).toBeUndefined();
+  });
+
+  it("teaches quests through the tool's guidelines", async () => {
+    const { questTool } = await startSession();
+
+    expect(questTool.promptGuidelines).toEqual([...QUEST_INSTRUCTIONS]);
+  });
+
+  it("notes a stale log once, on the request after one that left it unchanged", async () => {
+    const { questTool, request } = await startSession();
+    await request();
+    await questTool.execute("tc1", { action: "add", descriptions: ["Track me"] });
+
+    expect(await request()).toBeUndefined();
+    const stale = await request();
+    expect(stale).toEqual({
+      message: {
+        customType: QUEST_NOTE_TYPE,
+        content: expect.stringContaining(
+          "You have not updated the quests since the user's previous message.",
+        ),
+        display: false,
+      },
+    });
+    expect(stale.message.content).toContain("Next: [");
+    expect(await request()).toBeUndefined();
+
+    await questTool.execute("tc2", { action: "add", descriptions: ["More"] });
+    expect(await request()).toBeUndefined();
+    expect((await request())?.message.customType).toBe(QUEST_NOTE_TYPE);
+  });
+
+  it("does not note a resumed session's first request or a finished log", async () => {
+    const branch = [
+      {
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolName: "quest",
+          details: { quests: [{ id: "01", description: "Done", done: true, createdAt: 1 }] },
+        },
+      },
+    ];
+    const { request } = await startSession(branch);
+
+    expect(await request()).toBeUndefined();
+    expect(await request()).toBeUndefined();
   });
 
   it("does not register a context handler for dynamic reminders", async () => {
@@ -309,8 +293,11 @@ describe("extension entry point", () => {
       return pi;
     }
 
-    async function systemPrompt(pi: ReturnType<typeof createMockPi>): Promise<string> {
-      return (await pi._handlers.before_agent_start[0]({ systemPrompt: "base" })).systemPrompt;
+    async function listed(pi: ReturnType<typeof createMockPi>): Promise<string> {
+      const quest = pi.registerTool.mock.calls
+        .map(([tool]) => tool)
+        .find((tool) => tool.name === "quest");
+      return (await quest.execute("list", { action: "list" })).content[0].text;
     }
 
     it("starts empty, says so once and still registers the quest tool and /quests", async () => {
@@ -323,25 +310,27 @@ describe("extension entry point", () => {
       expect(pi.registerCommand).toHaveBeenCalledWith("quests", expect.anything());
       expect(ui.notify).toHaveBeenCalledTimes(1);
       expect(ui.notify).toHaveBeenCalledWith(expect.stringContaining("older pi-quests"), "warning");
-      expect(await systemPrompt(pi)).toContain("No active quests");
+      expect(await listed(pi)).toBe("No quests.");
 
       const quest = pi.registerTool.mock.calls
         .map(([tool]) => tool)
         .find((tool) => tool.name === "quest");
       const added = await quest.execute("tc1", { action: "add", descriptions: ["New quest"] });
-      expect(added.content[0].text).toMatch(/^Added quest \[[0-9a-f]{2}\]: New quest$/);
+      expect(added.content[0].text).toMatch(
+        /^Added quest \[[0-9a-f]{2}\]: New quest\n0 of 1 done\. /,
+      );
     });
 
     it("empties the log when the tree moves onto an old branch, notifying once", async () => {
       const pi = await startSession(currentBranch);
-      expect(await systemPrompt(pi)).not.toContain("No active quests");
+      expect(await listed(pi)).not.toBe("No quests.");
 
       await pi._handlers.session_tree[0]({}, contextFor(legacyBranch));
       await pi._handlers.session_tree[0]({}, contextFor(legacyBranch));
 
       expect(ui.notify).toHaveBeenCalledTimes(1);
       expect(ui.setStatus).toHaveBeenLastCalledWith("pi-quests", undefined);
-      expect(await systemPrompt(pi)).toContain("No active quests");
+      expect(await listed(pi)).toBe("No quests.");
     });
 
     it("still reports failures other than unreadable saved quests", async () => {

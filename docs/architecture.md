@@ -6,8 +6,8 @@
 
 pi-quests is a quest log for coding agents. Its engine in `src/` runs in two hosts:
 
-- The [pi](https://github.com/earendil-works/pi-mono/tree/main/packages/coding-agent) extension in `extensions/pi/` adds a session-scoped quest log with one LLM-callable tool (`quest`) and one command namespace (`/quests`), both operating on a shared in-memory `QuestLog` dataplane. It loads via `pi install npm:pi-quests` (or `pi -e ./extensions/pi/index.ts` for local development) and registers the tool, command, message renderer, session event hooks, and system prompt injection.
-- The bb plugin in `extensions/bb/`, described in [bb thread state](#bb-thread-state). It gives every bb thread the `quest` tool, whichever provider runs it; [Quests in bb](bb.md) is its user guide.
+- The [pi](https://github.com/earendil-works/pi-mono/tree/main/packages/coding-agent) extension in `extensions/pi/` adds a session-scoped quest log with one LLM-callable tool (`quest`) and one command namespace (`/quests`), both operating on a shared in-memory `QuestLog` dataplane. It loads via `pi install npm:pi-quests` (or `pi -e ./extensions/pi/index.ts` for local development) and registers the tool, command, message renderer, session event hooks, and the stale-log note.
+- The bb plugin in `extensions/bb/`, described in [bb thread state](#bb-thread-state). It gives every bb thread the `quest` tool, whichever provider runs it, and shows the log above the composer, in a Quests tab and in the Info tab; [Quests in bb](bb.md) is its user guide.
 
 ## Repository layout
 
@@ -31,7 +31,7 @@ graph LR
         quest_fmt[quest/formatters.ts<br/>pure result formatting]
         defaults[quest/defaults.ts<br/>ResolvedConfig, DEFAULT_CONFIG]
         progress[quest/progress.ts<br/>questProgress]
-        prompts[prompts.ts<br/>prompt gate and reminders]
+        prompts[prompts.ts<br/>instructions and the note]
     end
 
     subgraph pi_ext[extensions/pi/ pi extension]
@@ -53,7 +53,10 @@ graph LR
     subgraph bb_ext[extensions/bb/ bb plugin]
         server[server.ts<br/>quest tool, RPC, fork handler]
         store[store.ts<br/>per-thread metadata store]
-        app[app.tsx<br/>Quests tab, progress chip]
+        requests[requests.ts<br/>the note at a new request]
+        shared[shared.ts<br/>query tags, steer providers]
+        app[app.tsx<br/>slot registrations]
+        ui[ui/*.tsx<br/>segment, tab, Info row, popup]
     end
 
     index --> bb_bridge
@@ -73,11 +76,16 @@ graph LR
     tool_handler --> dataplane
     cmd_handler --> dataplane
     server --> store
+    server --> requests
     server --> prompts
+    requests --> store
     store --> dataplane
     store --> progress
+    store --> prompts
     render_status --> progress
-    app --> server
+    app --> ui
+    ui --> shared
+    server --> shared
     dataplane --> quest_fmt
     dataplane --> quest_types
     dataplane --> defaults
@@ -90,7 +98,7 @@ graph LR
 | `src/quest/dataplane.ts` | `QuestLog` — quest array, random hex IDs, history stack, `execute()`, revert, JSON state (`toJSON`, `restore`, `fromJSON`) |
 | `src/quest/defaults.ts` | Pure `ResolvedConfig` and `DEFAULT_CONFIG`, shared by pi and bb |
 | `src/quest/progress.ts` | `questProgress` — done and total over quests and steps, shared by pi's footer and bb |
-| `src/prompts.ts` | `QUEST_PROMPT_GATE` and `QUEST_PROMPT_REMINDER`, shared by pi and bb |
+| `src/prompts.ts` | `QUEST_INSTRUCTIONS`, the user-changes block and `formatQuestNote`, shared by pi and bb |
 | `src/skills/quest-management/SKILL.md` | The quest skill document |
 | `extensions/pi/index.ts` | pi entry point — creates `QuestLog`, registers tools/commands/renderers, wires session hooks |
 | `extensions/pi/session.ts` | pi session reconstruction and the `quest` tool result shape |
@@ -109,9 +117,12 @@ graph LR
 | `extensions/pi/renderers/changelog.ts` | Message renderer for `quest-changelog` messages |
 | `extensions/pi/logger.ts` | Namespaced debug logging |
 | `extensions/pi/version.ts` | Version and changelog path constants |
-| `extensions/bb/server.ts` | bb backend — the `quest` tool, the `getLog` and `mutate` RPC methods, the fork handler |
-| `extensions/bb/store.ts` | Per-thread quest state in bb thread metadata |
-| `extensions/bb/app.tsx` | Quests tab and progress chip |
+| `extensions/bb/server.ts` | bb backend — the `quest` tool, the `getLog`, `mutate` and `tell` RPC methods, the fork handler |
+| `extensions/bb/store.ts` | Per-thread quest state in bb thread metadata, and note delivery |
+| `extensions/bb/requests.ts` | Watches a person's new request and steers the note in once the agent uses a tool |
+| `extensions/bb/shared.ts` | Query tags, steer providers and the quiet threshold, shared by server and page |
+| `extensions/bb/app.tsx` | Slot registrations: the tab, the context segment, the Info row, the send menu item, the command |
+| `extensions/bb/ui/*.tsx` | The page: shared query hooks (`data.ts`), the segment, the Quests tab, the Info row, the Add as a quest popup |
 
 ## Data flow
 
@@ -252,15 +263,13 @@ The undo logic is implemented as a typed `undoHandlers` map — one handler per 
 
 ### Prompt injection
 
-On `before_agent_start`, the extension prepends a high-salience `# Quest Management` gate to the system prompt (exploiting primacy bias). While the quest log is empty, it also appends a reminder block (exploiting recency) that asks the agent to learn the quest tool and start tracking the task. This creates an instruction sandwich that encourages the agent to track work as specific, actionable quests before any file reads or edits.
+The rules live in one list, `QUEST_INSTRUCTIONS` in `src/prompts.ts`. pi gets them as the `quest` tool's `promptGuidelines`, and bb as the tool's `instructions`. They say what quests are for, when to skip them, and the moments to revisit the log, rather than ordering the agent to track everything before it reads a file.
 
-To preserve prompt-cache hits, the injected text is static: it never embeds counts, IDs, or per-session interpolation, so cache keys remain stable across turns. The extension does not register a `context` handler for dynamic reminder messages; runtime guidance comes from explicit quest tool use, commands, static prompt text, and tool metadata.
-
-The `quest` tool registration also supplies `promptSnippet` and `promptGuidelines`, which the framework injects into the default system prompt when the tool is active.
+The pi extension never rewrites the system prompt, so the prompt and pi's prompt cache stay the same for the whole session. On `before_agent_start` it compares the log with the one the previous request started with. When quests are open and nothing changed, it returns one custom message, `quest-note`, built by `formatQuestNote`: the progress, the open quests and why the note was sent. pi sends it with the user's prompt, so it costs no extra model call. The note goes out once per stale stretch; only a change to the log arms it again. The extension does not register a `context` handler for dynamic reminders.
 
 ## bb thread state
 
-The plugin in `extensions/bb/` runs the same engine inside bb, the getbb.app workspace for agent threads, so a thread on any agent provider gets the `quest` tool. `extensions/bb/server.ts` registers that tool and two RPC methods, `getLog` and `mutate`, for the frontend in `extensions/bb/app.tsx`, which adds a Quests tab to the thread's side panel and a progress chip to the action row of the thread's prompt box, beside voice and send. The chip shows done and total counts, lists up to five open quests on hover, and opens the Quests tab when clicked. Both paths go through `extensions/bb/store.ts`, so the tool and the tab edit one log. The server reads no files: bb loads `src/skills/quest-management/SKILL.md` as a plugin skill, and the `skill` and `rules` actions point to it.
+The plugin in `extensions/bb/` runs the same engine inside bb, the getbb.app workspace for agent threads, so a thread on any agent provider gets the `quest` tool. `extensions/bb/server.ts` registers that tool and three RPC methods for the page: `getLog`, `mutate` and `tell`. The page, `extensions/bb/app.tsx` with its components in `extensions/bb/ui/`, adds a segment to bb's context row above the composer, a Quests tab, a Quests row in the Info tab, an "Add as a quest" send-menu item and an "Open the Quests tab" command. Every path goes through `extensions/bb/store.ts`, so the tool and the page edit one log. The server reads no files: bb loads `src/skills/quest-management/SKILL.md` as a plugin skill, and the `skill` and `rules` actions point to it.
 
 The store keeps each thread's state in bb's thread metadata under the fixed namespace `quests` rather than the plugin id, so other plugins can read the progress and a package rename keeps every thread's quests:
 
@@ -268,11 +277,17 @@ The store keeps each thread's state in bb's thread metadata under the fixed name
 |-----|----------|
 | `log` | `QuestLog.toJSON()`: quests, steps, used IDs, and the newest 50 undo and 50 redo entries |
 | `progress` | `{ done, total, current }` over every quest and step, the count pi's footer shows; `current` is the first unfinished top-level quest |
-| `pendingUserChanges` | Edits made in the Quests tab that the agent has not seen yet: the newest 50, then one `and N earlier changes` line |
+| `pendingUserChanges` | Edits made in bb that the agent has not seen yet: the newest 50, then one `and N earlier changes` line |
+| `agentChangedAt` | When the agent's quest tool last changed the log, in epoch milliseconds; null until it does |
+| `notedAt` | When the agent last got a note that its log had gone stale; null until then |
 
-Each operation reads the namespace, runs one action, and writes all three keys in a single metadata update under a per-thread lock, then publishes `{ threadId }` on the `quests` realtime channel so open tabs and chips refetch. A failed action writes nothing. An edit in the tab is appended to `pendingUserChanges`; the next quest tool result starts with those edits and clears them. Invalid saved state is reported as an error rather than replaced. bb refuses a namespace over 256 KiB, so a write that would exceed it first drops the oldest undo or redo entry, from the longer stack, until it fits, then folds the oldest pending edits into the count line; only quests that alone exceed the limit fail the write.
+Each operation reads the namespace, runs one action, and writes every key in a single metadata update under a per-thread lock, then invalidates the query tag `quests:<threadId>` so every open view refreshes. A failed action writes nothing. An edit from the page is appended to `pendingUserChanges`; the next quest tool result or note starts with those edits and clears them. Invalid saved state is reported as an error rather than replaced. bb refuses a namespace over 256 KiB, so a write that would exceed it first drops the oldest undo or redo entry, from the longer stack, until it fits, then folds the oldest pending edits into the count line; only quests that alone exceed the limit fail the write.
 
-The Quests tab and the chip refetch on that signal and again whenever the realtime connection comes back, since signals sent while it was down are not replayed. Answers can arrive out of order, so a `getLog` answer is applied only if no newer request or change has answered since it was asked. The tab sends one change at a time and disables its change controls until the answer arrives.
+The page reads the log with `experimental_useRpcQuery` against a zod-free copy of the contract that carries the same tags (`extensions/bb/shared.ts`), so the segment, the tab and the Info row share one cached read, and changes go through `experimental_useRpcMutation`. bb refreshes tagged reads after a reconnect, so nothing is missed while the connection was down. The page learns whether the thread is working from bb's sidebar thread list, and counts a log as quiet once a working agent has left its open quests unchanged for 10 minutes, measured from the later of the agent's last change and the moment the page saw the turn start.
+
+`extensions/bb/requests.ts` sends the note. On `thread.active` for a pi, Claude Code or Codex thread with open quests or unseen edits, it reads the newest `client/turn/requested` events. When the newest is a person's request (user-initiated, with text that is not agent-only), it watches the thread. On each `experimental_thread.events` signal it reads the `item/started` and `item/completed` events since its last look and tracks which tool items are running. A quest tool call ends the watch unsent; a running non-quest tool sends the note, because a steer that lands during a tool joins the next model call instead of adding one. The store decides under the thread lock whether anything is worth sending: the log is stale when the agent's last change is older than the person's previous request and newer than the last note. It sends the note as an agent-only steer, then clears the pending edits and records `notedAt`. Every turn boundary (`thread.active`, `thread.idle`, `thread.failed`) bumps a per-thread generation, so a read that started before the boundary cannot install a watch after it. `tell` delivers only the pending edits, and only to a running thread on one of those providers.
+
+A steer to a thread whose turn has just ended would start a new turn, so the plugin also answers bb's `message.dispatch` hook: it rejects an agent-only message that starts with `[Quests]` when the attempt would start a turn, and lets everything else through. The handler is synchronous and catches its own errors, because a throwing dispatch hook fails every message in bb.
 
 Forks do not inherit metadata, so the store copies the source's log, without its pending edits, into a fork the first time bb announces it (`thread.created`) or the first time anything reads it. Side chats start with an empty log.
 
