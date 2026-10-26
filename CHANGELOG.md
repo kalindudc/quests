@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-26
+
 - feat: every change the agent makes returns the plan's progress and the next open item, and a split returns the new step ids, so the agent rarely needs a `list` call to keep going
 - feat: the quest instructions, shared by bb and pi, now say what quests are for, when to skip them, and the moments to revisit the log: the user redirects, a resume after an error, a minion's report and the final answer; the quest-management skill says the same in full
 - feat(bb): when a person's request starts a turn on a thread whose open quests went unchanged through the previous request, or whose Quests tab has edits the agent has not seen, the plugin steers one short agent-only note into the turn while one of the agent's tools is running, so the note joins a model call the agent makes anyway; it skips the note once the agent calls the quest tool, sends it once per stale stretch and only on providers that take a steer (pi, Claude Code, Codex), and a `message.dispatch` hook refuses a note that would start a turn
@@ -10,10 +12,9 @@
 - feat(bb): a Quests row in the thread Info tab, an "Add as a quest" item in the send menu that puts the draft on the log without interrupting the agent, and an "Open the Quests tab" command on ⌘⇧L
 - feat(pi): a stale log gets the same note attached to the user's prompt, so it costs no extra model call; the extension no longer rewrites the system prompt each run, which kept the prompt cache warm only until the log first changed, and no longer tells an agent with an empty log to "DO THIS NOW and acknowledge it"
 - feat: `scripts/quest-audit.mjs` samples recent bb threads and measures how well agents keep their quest logs current; see [the audit](docs/audit.md)
-- chore(bb): the plugin needs bb 0.47 and plugin SDK 0.6.79; the Quests tab registers through `experimental_tab`, reads go through bb's tagged query cache instead of the `quests` realtime channel, and the composer's progress chip is gone
-
-- docs: a guide to the bb plugin (`docs/bb.md`) with screenshots of the Quests tab and the progress chip; the README presents the quest log for both bb and pi, and the reference and patterns document `undo` and `redo` instead of the removed `revert`
+- docs: a guide to the bb plugin (`docs/bb.md`) with screenshots; the README presents the quest log for both bb and pi, and the reference and patterns document `undo` and `redo` instead of the removed `revert`
 - docs: the quest-management skill, which bb gives every provider, no longer calls itself a pi extension and no longer says undo goes back only one step
+- chore(bb): the plugin needs bb 0.47 and plugin SDK 0.6.79; the Quests tab registers through `experimental_tab`, reads go through bb's tagged query cache instead of the `quests` realtime channel, and the composer's progress chip is gone
 - chore: CI runs on Node 22, because the pi packages need Node 22.19 or later and the tests failed on Node 20
 
 ## [0.10.0] - 2026-10-18
