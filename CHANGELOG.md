@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-10-29
+
+- fix(bb): quest row controls no longer reserve blank space while hidden; their space expands on hover or keyboard focus, with controls always visible on touch screens and animation disabled for reduced motion
+
 ## [0.11.0] - 2026-10-26
 
 - feat: every change the agent makes returns the plan's progress and the next open item, and a split returns the new step ids, so the agent rarely needs a `list` call to keep going

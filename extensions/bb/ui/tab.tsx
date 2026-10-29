@@ -30,7 +30,7 @@ type Change = (action: QuestMutation) => Promise<boolean>;
 
 // Row controls stay out of the way until a row is hovered or focused; touch screens always show them.
 const ROW_CONTROLS =
-  "flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100";
+  "-ml-2 grid shrink-0 grid-cols-[0fr] opacity-0 transition-[grid-template-columns,opacity] duration-150 group-hover:grid-cols-[1fr] group-hover:opacity-100 group-focus-within:grid-cols-[1fr] group-focus-within:opacity-100 pointer-coarse:grid-cols-[1fr] pointer-coarse:opacity-100 motion-reduce:transition-none";
 
 function QuestRow({
   quest,
@@ -127,14 +127,18 @@ function QuestRow({
         </span>
       ) : (
         <span className={ROW_CONTROLS}>
-          <span className="font-mono text-[10px] text-muted-foreground">{quest.id}</span>
-          {children}
-          <IconButton icon="Edit" label={`Edit ${name}`} onClick={() => setEditing(true)} />
-          <IconButton
-            icon="Trash2"
-            label={`Delete ${name}`}
-            onClick={() => setConfirmingDelete(true)}
-          />
+          <span className="min-w-0 overflow-hidden">
+            <span className="flex w-max items-center pl-2">
+              <span className="font-mono text-[10px] text-muted-foreground">{quest.id}</span>
+              {children}
+              <IconButton icon="Edit" label={`Edit ${name}`} onClick={() => setEditing(true)} />
+              <IconButton
+                icon="Trash2"
+                label={`Delete ${name}`}
+                onClick={() => setConfirmingDelete(true)}
+              />
+            </span>
+          </span>
         </span>
       )}
     </div>

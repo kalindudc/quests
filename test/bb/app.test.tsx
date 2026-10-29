@@ -235,6 +235,31 @@ describe("Quests tab", () => {
     expect(slot.getByRole("list", { name: "Done quests" }).textContent).toContain("Other");
   });
 
+  it("collapses row controls until hover or focus, keeping them expanded on touch screens", async () => {
+    const slot = await renderTab(backend(LOG));
+    await slot.findByText("Parent");
+    fireEvent.click(button(slot, /Done · 1/));
+
+    for (const description of ["Parent", "Child", "Other"]) {
+      const edit = button(slot, `Edit "${description}"`);
+      const controls = edit.closest(".grid");
+      expect(controls).not.toBeNull();
+      expect(Array.from(controls?.classList ?? [])).toEqual(
+        expect.arrayContaining([
+          "-ml-2",
+          "grid-cols-[0fr]",
+          "group-hover:grid-cols-[1fr]",
+          "group-focus-within:grid-cols-[1fr]",
+          "pointer-coarse:grid-cols-[1fr]",
+          "transition-[grid-template-columns,opacity]",
+          "motion-reduce:transition-none",
+        ]),
+      );
+      expect(controls?.firstElementChild?.className).toContain("overflow-hidden");
+      expect(edit.parentElement?.className).toContain("w-max");
+    }
+  });
+
   it("adds a quest and shows the refreshed log", async () => {
     const server = backend(EMPTY);
     server.changesTo(viewOf([{ id: "01", description: "Write docs", done: false, createdAt: 1 }]));
